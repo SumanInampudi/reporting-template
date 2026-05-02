@@ -1,0 +1,3 @@
+# Root-level requirements for Databricks Apps deployment.
+# Databricks Apps looks for this file at the deploy root.
+-r backend/requirements.txt

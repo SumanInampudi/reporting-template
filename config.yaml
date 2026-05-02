@@ -1,0 +1,43 @@
+datasource:
+  type: databricks
+  host: "${DATABRICKS_HOST}"
+  http_path: "/sql/1.0/warehouses/${DATABRICKS_WAREHOUSE_ID}"
+  catalog: "${DEFAULT_CATALOG}"
+  schema: "${DEFAULT_SCHEMA}"
+
+auth:
+  # "pat" for local dev (uses DATABRICKS_TOKEN)
+  # "oauth" for Databricks Apps (uses auto-injected service principal)
+  method: "${AUTH_MODE}"
+  token: "${DATABRICKS_TOKEN}"
+  client_id: "${DATABRICKS_CLIENT_ID}"
+  client_secret: "${DATABRICKS_CLIENT_SECRET}"
+
+# Bootstrap credentials for the Secrets API (only needed with ${secrets:...} syntax)
+# secrets:
+#   bootstrap_token: "${DATABRICKS_BOOTSTRAP_TOKEN}"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://localhost:3000"
+
+settings:
+  local_test_mode: "${LOCAL_TEST_MODE}"
+  debug: "${DEBUG}"
+  log_level: "${LOG_LEVEL}"
+  default_row_limit: "${DEFAULT_ROW_LIMIT}"
+  max_row_limit: "${MAX_ROW_LIMIT}"
+  query_timeout_seconds: "${QUERY_TIMEOUT_SECONDS}"
+
+features:
+  enable_charts: "${ENABLE_CHARTS}"
+  enable_presets: "${ENABLE_PRESETS}"
+  enable_sql_preview: "${ENABLE_SQL_PREVIEW}"
+  enable_csv_export: "${ENABLE_CSV_EXPORT}"
+
+cache:
+  enabled: true
+  ttl_seconds: 300

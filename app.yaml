@@ -1,0 +1,64 @@
+# Databricks Apps runtime configuration (standalone fallback)
+# https://docs.databricks.com/en/dev-tools/databricks-apps/app-runtime
+#
+# NOTE: When deploying via Databricks Asset Bundles (databricks.yml),
+# the bundle's config block overrides these values. This file is only
+# used for standalone deployments or local testing with:
+#   databricks apps run-local
+#
+# The command builds the React frontend, then starts the FastAPI backend.
+# Databricks auto-sets UVICORN_PORT and UVICORN_HOST for FastAPI apps.
+#
+# When Jenkins pre-builds the frontend, simplify the command to:
+#   command: ['uvicorn', 'backend.main:app']
+
+command:
+  - bash
+  - -c
+  - "cd frontend && npm install --include=dev && npm run build && cd .. && uvicorn backend.main:app"
+
+env:
+  # ── Required: replace with your SQL Warehouse ID ──
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "<your-warehouse-id>"
+
+  # ── Default catalog & schema ──
+  - name: DEFAULT_CATALOG
+    value: "main"
+  - name: DEFAULT_SCHEMA
+    value: "default"
+
+  # ── App mode ──
+  - name: LOCAL_TEST_MODE
+    value: "false"
+  - name: DEBUG
+    value: "false"
+
+  # ── Auth method (use "oauth" for service principal in Databricks Apps) ──
+  - name: AUTH_MODE
+    value: "oauth"
+
+  # ── Feature flags ──
+  - name: ENABLE_CHARTS
+    value: "true"
+  - name: ENABLE_PRESETS
+    value: "true"
+  - name: ENABLE_SQL_PREVIEW
+    value: "true"
+  - name: ENABLE_CSV_EXPORT
+    value: "true"
+
+  # ── Query limits ──
+  - name: DEFAULT_ROW_LIMIT
+    value: "0"
+  - name: MAX_ROW_LIMIT
+    value: "0"
+  - name: QUERY_TIMEOUT_SECONDS
+    value: "300"
+
+  # ── Logging ──
+  - name: LOG_LEVEL
+    value: "INFO"
+
+  # Note: DATABRICKS_HOST, DATABRICKS_CLIENT_ID, and DATABRICKS_CLIENT_SECRET
+  # are auto-injected by Databricks Apps runtime — do NOT set them here.

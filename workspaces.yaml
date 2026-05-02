@@ -1,0 +1,65 @@
+workspaces:
+- id: booking-broadcast---dev
+  name: Booking Broadcast - DEV
+  description: ''
+  created_at: '2026-04-20T17:54:10.485356+00:00'
+  datasource:
+    catalog: development
+    schema: dev_bookings_broadcast
+    default_table: global_bookings_broadcast_yoy_curated
+  capabilities:
+  - ai_insights
+  - dashboarding
+  - self_service
+  features:
+  - download_data
+  - custom_columns
+  - subscriptions
+  - presets
+  settings:
+    theme: nike
+    density: spacious
+    row_limit: 0
+  dashboard_features:
+  - kpi_metrics
+  - charts
+  - pivot_table
+  secret_scope: obcd-app-secrets-non-prod
+  secret_key: sp-token
+  column_aliases:
+    geo: geo
+    Territory: Territory
+    gate_cy: gate_cy
+    gate_ly: gate_ly
+    current_year_season_year: current_year_season_year
+    last_year_season_year: last_year_season_year
+    channel: channel
+    Division: Division
+    MPU: MPU
+    Account: Account
+    Franchise: Franchise
+    Customer_channel: Customer_channel
+    Consumer: Consumer
+    Field_of_play: Field_of_play
+    merchandising_classification: merchandising_classification
+    Brand_nm: Brand_nm
+    newness_ind: newness_ind
+    product_tier: product_tier
+    amt_booked_cy: amt_booked_cy
+    amt_booked_ly: amt_booked_ly
+    quantities_booked_cy: quantities_booked_cy
+    quantities_booked_ly: quantities_booked_ly
+    amt_growth_percentage: amt_growth_percentage
+    quantities_growth_percentage: quantities_growth_percentage
+    global_sport_focus: global_sport_focus
+    global_sport_sub_focus: global_sport_sub_focus
+    sub_brand_nm: sub_brand_nm
+  column_aggregations:
+    amt_booked_cy: SUM
+    amt_booked_ly: SUM
+    quantities_booked_cy: SUM
+    quantities_booked_ly: SUM
+  ai_settings:
+    options:
+    - llm_connection
+    llmEndpoint: url

@@ -1,0 +1,143 @@
+# Databricks Asset Bundle (DAB) configuration
+# https://docs.databricks.com/en/dev-tools/bundles/apps-tutorial
+#
+# Quick start for any team:
+#   1. Install Databricks CLI >= 0.250.0
+#   2. Configure a profile:  databricks configure --profile <name>
+#   3. Deploy:
+#        databricks bundle deploy -t dev \
+#          --var warehouse_id=<your-warehouse-id>
+#   4. Start the app:
+#        databricks bundle run bi_dashboard -t dev
+#
+# All team-specific values are provided at deploy time via --var flags
+# or in a local .databricks/ override (gitignored).
+
+bundle:
+  name: bi_excellence_dashboard
+
+variables:
+  warehouse_id:
+    description: "SQL Warehouse ID (required)"
+  catalog:
+    description: "Default Unity Catalog name"
+    default: "main"
+  schema:
+    description: "Default schema"
+    default: "default"
+  log_level:
+    description: "Python log level"
+    default: "INFO"
+  default_row_limit:
+    description: "Default row limit for queries (0 = no limit, driven by workspace config)"
+    default: "0"
+  max_row_limit:
+    description: "Maximum row limit for queries (0 = no limit, driven by workspace config)"
+    default: "0"
+  query_timeout_seconds:
+    description: "SQL query timeout in seconds"
+    default: "300"
+  allowed_catalogs:
+    description: "Comma-separated list of catalogs visible in the app ('none' = show all)"
+    default: "none"
+  secret_scope:
+    description: "Databricks secret scope holding the SP fallback token ('none' = disabled)"
+    default: "none"
+  secret_key:
+    description: "Key within the secret scope for the SP token"
+    default: "sp-token"
+  admin_role_suffixes:
+    description: "Comma-separated group name suffixes that grant admin role ('none' = everyone is admin)"
+    default: "none"
+  storage_backend:
+    description: "Persistence backend: 'delta' (recommended) or 'yaml'"
+    default: "delta"
+  app_metadata_catalog:
+    description: "Unity Catalog for app metadata tables (workspaces, presets, etc.)"
+    default: "development"
+  app_metadata_schema:
+    description: "Schema for app metadata tables — use a unique schema per team"
+    default: "bi_app_metadata"
+
+resources:
+  apps:
+    bi_dashboard:
+      name: "bi-excellence-${bundle.target}"
+      source_code_path: .
+      description: "BI Excellence Self-Service Dashboard"
+
+      config:
+        command:
+          - bash
+          - -c
+          - "cd frontend && npm install --include=dev && npm run build && cd .. && uvicorn backend.main:app"
+        env:
+          - name: DATABRICKS_WAREHOUSE_ID
+            value: ${var.warehouse_id}
+          - name: DEFAULT_CATALOG
+            value: ${var.catalog}
+          - name: DEFAULT_SCHEMA
+            value: ${var.schema}
+          - name: LOCAL_TEST_MODE
+            value: "false"
+          - name: DEBUG
+            value: "false"
+          - name: AUTH_MODE
+            value: "oauth"
+          - name: ENABLE_CHARTS
+            value: "true"
+          - name: ENABLE_PRESETS
+            value: "true"
+          - name: ENABLE_SQL_PREVIEW
+            value: "true"
+          - name: ENABLE_CSV_EXPORT
+            value: "true"
+          - name: DEFAULT_ROW_LIMIT
+            value: ${var.default_row_limit}
+          - name: MAX_ROW_LIMIT
+            value: ${var.max_row_limit}
+          - name: QUERY_TIMEOUT_SECONDS
+            value: ${var.query_timeout_seconds}
+          - name: LOG_LEVEL
+            value: ${var.log_level}
+          - name: ALLOWED_CATALOGS
+            value: ${var.allowed_catalogs}
+          - name: DEFAULT_SECRET_SCOPE
+            value: ${var.secret_scope}
+          - name: DEFAULT_SECRET_KEY
+            value: ${var.secret_key}
+          - name: ADMIN_ROLE_SUFFIXES
+            value: ${var.admin_role_suffixes}
+          - name: STORAGE_BACKEND
+            value: ${var.storage_backend}
+          - name: APP_METADATA_CATALOG
+            value: ${var.app_metadata_catalog}
+          - name: APP_METADATA_SCHEMA
+            value: ${var.app_metadata_schema}
+
+      permissions:
+        - level: CAN_USE
+          group_name: users
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      allowed_catalogs: "development,published_analytics,published_domain,non_published_analytics,non_published_domain"
+      secret_scope: "obcd-app-secrets-non-prod"
+      secret_key: "sp-token"
+      app_metadata_catalog: "development"
+      app_metadata_schema: "dev_zoomio_analytical_foundation"
+
+  prod:
+    mode: production
+    variables:
+      allowed_catalogs: "published_analytics,published_domain,non_published_analytics,non_published_domain"
+      secret_scope: "obcd-app-secrets"
+      secret_key: "sp-token"
+      app_metadata_catalog: "non_published_analytics"
+      app_metadata_schema: "zoomio_analytical_foundation"
+    permissions:
+      - level: CAN_MANAGE
+        group_name: admins
