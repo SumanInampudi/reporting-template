@@ -1,21 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
-  Filter, Play, Loader2, AlertTriangle, CheckCircle2, TableIcon, Code, ClipboardList,
-  ArrowUp, ArrowDown, ArrowUpDown, Columns3, XCircle, Check, Circle, Download,
+  Filter, Play, Loader2, AlertTriangle, TableIcon, Code, ClipboardList,
+  ArrowUp, ArrowDown, ArrowUpDown, Columns3, XCircle, Check, Circle, Download, FileSpreadsheet,
+  Plus, Sigma, Hash, Type, Pencil,
 } from "lucide-react";
+import { SkeletonTable } from "@/components/ui/Skeleton";
 import { useStore } from "@/hooks/useStore";
 import { useColumnAlias } from "@/hooks/useColumnAlias";
-import { runQuery, exportCsv } from "@/lib/api";
-import { buildLoadSql, buildCountSql } from "@/lib/sqlBuilder";
+import { runQuery, exportCsv, exportExcel } from "@/lib/api";
+import { buildLoadSql, buildCountSql, type SmartJoinContext } from "@/lib/sqlBuilder";
+import { toast } from "@/components/ui/Toast";
+import BaseFilterBanner from "@/components/filters/BaseFilterBanner";
 import FilterChip from "@/components/filters/FilterChip";
 import DateFilterChip from "@/components/filters/DateFilterChip";
+import NumericFilterChip from "@/components/filters/NumericFilterChip";
+import FreeTextFilterChip from "@/components/filters/FreeTextFilterChip";
+import SearchSelectChip from "@/components/filters/SearchSelectChip";
+import DimensionFilterChip from "@/components/filters/DimensionFilterChip";
 import DynamicFilterPanel from "@/components/filters/DynamicFilterPanel";
 import CollapsibleSection from "@/components/ui/CollapsibleSection";
-import ColumnPicker from "./ColumnPicker";
+import ColumnSelectorModal from "./ColumnSelectorModal";
 import FormulaBuilder from "./FormulaBuilder";
 import SelectionSummaryModal from "./SelectionSummaryModal";
 import SqlModal from "@/components/ui/SqlModal";
+import { applyClientJoin } from "@/lib/clientJoin";
+import { NUMERIC_RE } from "@/lib/constants";
 import type { SelfServiceFeature } from "@/types/dashboard";
 
 type LoadPhase = "idle" | "counting" | "fetching" | "rendering";
@@ -58,7 +68,7 @@ function LoadStepper({ phase, timings }: { phase: LoadPhase; timings: Record<str
   );
 }
 
-const HIDDEN_COLS = new Set(["__row_number__"]);
+const HIDDEN_COLS = new Set(["__row_number__", "__row_count__"]);
 
 function stripInternalCols(data: { columns: string[]; rows: unknown[][] }): { columns: string[]; rows: unknown[][] } {
   const keepIdx = data.columns
@@ -81,12 +91,13 @@ function formatCell(value: unknown): string {
   return String(value);
 }
 
-function DataPreview({ showDownload = true }: { showDownload?: boolean }) {
+function DataPreview({ showDownload = true, showExcel = false }: { showDownload?: boolean; showExcel?: boolean }) {
   const { baseDataset, baseDatasetSql, estimatedRowCount } = useStore();
   const colAlias = useColumnAlias();
   const [sortCol, setSortCol] = useState<number | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"csv" | "xlsx">("csv");
 
   const display = useMemo(
     () => (baseDataset ? stripInternalCols(baseDataset) : null),
@@ -125,11 +136,16 @@ function DataPreview({ showDownload = true }: { showDownload?: boolean }) {
 
   if (!display) return null;
 
-  const handleExport = async () => {
+  const handleExport = async (fmt: "csv" | "xlsx" = "csv") => {
     if (!baseDatasetSql) return;
     setExporting(true);
+    setExportFormat(fmt);
     try {
-      await exportCsv(baseDatasetSql, "dataset-export.csv");
+      if (fmt === "xlsx") {
+        await exportExcel(baseDatasetSql, "dataset-export.xlsx");
+      } else {
+        await exportCsv(baseDatasetSql, "dataset-export.csv");
+      }
     } catch (err) {
       alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
@@ -149,8 +165,13 @@ function DataPreview({ showDownload = true }: { showDownload?: boolean }) {
         </span>
         <div className="data-preview-actions">
           {showDownload && (
-            <button className="colpick-btn" onClick={handleExport} disabled={exporting || !baseDatasetSql}>
-              {exporting ? <><Loader2 size={12} className="spin" /> Exporting…</> : <><Download size={12} /> Export CSV</>}
+            <button className="colpick-btn" onClick={() => handleExport("csv")} disabled={exporting || !baseDatasetSql} title="Export CSV (Ctrl+E)">
+              {exporting && exportFormat === "csv" ? <><Loader2 size={12} className="spin" /> Exporting…</> : <><Download size={12} /> CSV</>}
+            </button>
+          )}
+          {showExcel && (
+            <button className="colpick-btn" onClick={() => handleExport("xlsx")} disabled={exporting || !baseDatasetSql} title="Export Excel (.xlsx)">
+              {exporting && exportFormat === "xlsx" ? <><Loader2 size={12} className="spin" /> Exporting…</> : <><FileSpreadsheet size={12} /> Excel</>}
             </button>
           )}
         </div>
@@ -208,12 +229,21 @@ function mergedFormulas(store: ReturnType<typeof useStore.getState>) {
 export default function DataTab() {
   const {
     filters, appliedFilters, applyFilters, dynamicFilters,
-    selectedCatalog, selectedSchema, selectedTable,
+    selectedCatalog, selectedSchema, selectedTable, columns,
     selectedOutputColumns, formulaColumns, sharedFormulas,
     baseDatasetLoading, baseDatasetError, baseDataset,
-    setBaseDataset, setBaseDatasetLoading, setBaseDatasetError, setActiveTab,
+    setBaseDataset, setBaseDatasetLoading, setBaseDatasetError,
     activeWorkspace, metadataReady, effectiveRowLimit, setLastQueryMs,
+    dimensionFilters, dimensionSources, initDimensionFilters,
+    activatedOptionalDimIds, deactivateOptionalDim,
   } = useStore();
+
+  const colAlias = useColumnAlias();
+
+  useEffect(() => {
+    if (!activeWorkspace) return;
+    initDimensionFilters();
+  }, [activeWorkspace, initDimensionFilters]);
 
   const allFormulas = useMemo(() => {
     const sfAsFc = sharedFormulas.map((sf) => ({
@@ -228,10 +258,14 @@ export default function DataTab() {
   }, [activeWorkspace]);
 
   const showDownload = features.has("download_data");
+  const showExcel = features.has("export_excel");
   const showCustomCols = features.has("custom_columns");
 
   const [showPreviewSql, setShowPreviewSql] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+  const [colSelectorOpen, setColSelectorOpen] = useState(false);
+  const [formulaPanelOpen, setFormulaPanelOpen] = useState(false);
+  const [addFilterModalOpen, setAddFilterModalOpen] = useState(false);
 
   const { setNodeRef, isOver } = useDroppable({
     id: "filter-bar-drop",
@@ -239,10 +273,17 @@ export default function DataTab() {
   });
 
   const activeCount = filters.filter((f) =>
-    f.selectedValues.length > 0 || (f.dateFrom && f.dateTo),
+    f.selectedValues.length > 0 || (f.dateFrom && f.dateTo) || (f.freeTextValues && f.freeTextValues.length > 0),
   ).length;
   const dynamicActiveCount = dynamicFilters.filter((d) => d.enabled).length;
-  const totalFilterCount = activeCount + dynamicActiveCount;
+  const dimActiveCount = dimensionFilters.filter((f) => f.selectedValues.length > 0).length;
+  const totalFilterCount = activeCount + dynamicActiveCount + dimActiveCount;
+
+  const requiredDimsMissing = dimensionSources.some((ds) => {
+    if (!ds.required) return false;
+    const df = dimensionFilters.find((f) => f.id === `dim-${ds.id}`);
+    return !df || df.selectedValues.length === 0;
+  });
 
   const hasUnapplied = (() => {
     if (filters.length !== appliedFilters.length) return true;
@@ -254,11 +295,23 @@ export default function DataTab() {
     });
   })();
 
-  const fqTable = selectedCatalog && selectedSchema && selectedTable
-    ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null;
+  const effectiveTableRef = useStore((s) => s.effectiveTableRef);
+  const fqTable = effectiveTableRef();
+
+  const columnTableMap = useStore((s) => s.columnTableMap);
+  const wsJoins = activeWorkspace?.joins ?? [];
+  const joinCtx: SmartJoinContext | undefined = useMemo(() => {
+    if (!selectedCatalog || !selectedSchema || wsJoins.length === 0) return undefined;
+    return {
+      joins: wsJoins,
+      columnTableMap,
+      catalog: selectedCatalog,
+      schema: selectedSchema,
+    };
+  }, [wsJoins, columnTableMap, selectedCatalog, selectedSchema]);
 
   const isMeta = metadataReady();
-  const canLoad = fqTable && selectedOutputColumns.length > 0 && isMeta;
+  const canLoad = fqTable && selectedOutputColumns.length > 0 && isMeta && !requiredDimsMissing;
   const rowLimit = effectiveRowLimit();
 
   const loadPhase = useStore((s) => s.loadPhase);
@@ -287,10 +340,12 @@ export default function DataTab() {
     abortRef.current = ac;
 
     const currentFilters = useStore.getState().filters;
+    const dimFilters = useStore.getState().dimensionFilters;
+    const allFilters = [...currentFilters, ...dimFilters.filter((f) => f.selectedValues.length > 0)];
     const fcs = mergedFormulas(useStore.getState());
     const dynFilters = useStore.getState().dynamicFilters;
     const limit = useStore.getState().effectiveRowLimit();
-    const aggs = useStore.getState().activeWorkspace?.column_aggregations;
+    const aggs = useStore.getState().resolvedAggregations();
     const outCols = useStore.getState().selectedOutputColumns;
 
     clearBaseDataset();
@@ -304,8 +359,13 @@ export default function DataTab() {
 
     setLoadPhase("counting");
 
+    const jCtx: SmartJoinContext | undefined = useStore.getState().activeWorkspace?.joins?.length
+      ? { joins: useStore.getState().activeWorkspace!.joins!, columnTableMap: useStore.getState().columnTableMap, catalog: useStore.getState().selectedCatalog!, schema: useStore.getState().selectedSchema! }
+      : undefined;
+
     try {
-      const countSql = buildCountSql(fqTable, currentFilters, dynFilters, outCols, aggs);
+      const bfArr = useStore.getState().activeWorkspace?.datasource?.base_filters;
+      const countSql = buildCountSql(fqTable, allFilters, dynFilters, outCols, aggs, jCtx, bfArr);
       const countResult = await runQuery(countSql, undefined, ac.signal, true);
       const rowCount = Number(countResult.rows?.[0]?.[0] ?? 0);
       setLoadStepTiming("counting", Math.round(performance.now() - tStep));
@@ -329,13 +389,20 @@ export default function DataTab() {
 
     tStep = performance.now();
     setLoadPhase("fetching");
-    const fullSql = buildLoadSql(fqTable, selectedOutputColumns, fcs, currentFilters, dynFilters, limit, aggs);
+    const bfArr2 = useStore.getState().activeWorkspace?.datasource?.base_filters;
+    const fullSql = buildLoadSql(fqTable, selectedOutputColumns, fcs, allFilters, dynFilters, limit, aggs, jCtx, bfArr2);
     try {
-      const data = await runQuery(fullSql, PREVIEW_ROWS, ac.signal, true);
+      let data = await runQuery(fullSql, PREVIEW_ROWS, ac.signal, true);
       setLoadStepTiming("fetching", Math.round(performance.now() - tStep));
 
       tStep = performance.now();
       setLoadPhase("rendering");
+
+      const upload = useStore.getState().uploadedDataset;
+      if (upload?.joinConfig?.uploadKeyColumn && upload?.joinConfig?.primaryKeyColumn) {
+        data = applyClientJoin(data, upload);
+      }
+
       setBaseDataset(data, fullSql);
       setLastQueryMs(Math.round(performance.now() - t0));
 
@@ -352,12 +419,66 @@ export default function DataTab() {
     setLoadPhase("idle");
   }, [fqTable, selectedOutputColumns, formulaColumns, dynamicFilters, applyFilters, setBaseDataset, setBaseDatasetLoading, setBaseDatasetError, clearBaseDataset]);
 
-  const handleGoToDashboard = () => setActiveTab("dashboard");
+  const registerShortcut = useStore((s) => s.registerShortcut);
+  const baseDatasetSqlForExport = useStore((s) => s.baseDatasetSql);
 
-  const wsAggs = activeWorkspace?.column_aggregations;
+  useEffect(() => {
+    registerShortcut("load-data", canLoad ? handleLoadData : undefined);
+    return () => { registerShortcut("load-data", undefined); };
+  }, [canLoad, handleLoadData, registerShortcut]);
+
+  const handleExportShortcut = useCallback(async () => {
+    if (!baseDatasetSqlForExport) return;
+    try {
+      await exportCsv(baseDatasetSqlForExport, "dataset-export.csv");
+    } catch { toast.error("Export failed"); }
+  }, [baseDatasetSqlForExport]);
+
+  useEffect(() => {
+    registerShortcut("export", baseDatasetSqlForExport ? handleExportShortcut : undefined);
+    return () => { registerShortcut("export", undefined); };
+  }, [baseDatasetSqlForExport, handleExportShortcut, registerShortcut]);
+
+  const wsAggs = useStore.getState().resolvedAggregations();
+  const allPreviewFilters = [...filters, ...dimensionFilters.filter((f) => f.selectedValues.length > 0)];
+  const wsBf = useStore.getState().activeWorkspace?.datasource?.base_filters;
   const previewSql = canLoad
-    ? buildLoadSql(fqTable!, selectedOutputColumns, allFormulas, filters, dynamicFilters, rowLimit, wsAggs)
+    ? buildLoadSql(fqTable!, selectedOutputColumns, allFormulas, allPreviewFilters, dynamicFilters, rowLimit, wsAggs, joinCtx, wsBf)
     : null;
+
+  const requiredDimSources = dimensionSources.filter((ds) => ds.required);
+  const activatedOptionalDimSources = dimensionSources.filter(
+    (ds) => !ds.required && activatedOptionalDimIds.includes(ds.id),
+  );
+  const visibleDimSources = [...requiredDimSources, ...activatedOptionalDimSources];
+
+  /* ── Compact columns row calculations ── */
+  const isCustomQuery = activeWorkspace?.datasource?.source_mode === "query";
+  const colKey = isCustomQuery
+    ? (selectedTable ? "__custom_source__" : null)
+    : (selectedCatalog && selectedSchema && selectedTable
+      ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null);
+  const allCols = useMemo(() => (colKey ? columns[colKey] ?? [] : []), [colKey, columns]);
+  const colMap = useMemo(() => new Map(allCols.map((c) => [c.col_name, c])), [allCols]);
+
+  const dimCount = selectedOutputColumns.filter((n) => {
+    const m = colMap.get(n);
+    return m && !NUMERIC_RE.test(m.data_type);
+  }).length;
+  const measCount = selectedOutputColumns.filter((n) => {
+    const m = colMap.get(n);
+    return m && NUMERIC_RE.test(m.data_type);
+  }).length;
+  const formulaCount = formulaColumns.length + sharedFormulas.length;
+
+  const colTooltipLines = selectedOutputColumns
+    .filter((n) => !n.startsWith("__fc__") && !n.startsWith("__sf__"))
+    .slice(0, 15)
+    .map((n) => colAlias(n));
+  if (selectedOutputColumns.filter((n) => !n.startsWith("__fc__") && !n.startsWith("__sf__")).length > 15) {
+    colTooltipLines.push(`+${selectedOutputColumns.filter((n) => !n.startsWith("__fc__") && !n.startsWith("__sf__")).length - 15} more…`);
+  }
+  const colTooltip = colTooltipLines.join("\n");
 
   return (
     <div className="data-tab">
@@ -368,107 +489,160 @@ export default function DataTab() {
           icon={<Filter size={14} />}
           badge={totalFilterCount > 0 ? <span className="dt-filter-badge">{totalFilterCount}</span> : undefined}
           collapseKey={collapseVer}
+          actions={
+            <button
+              className="dt-header-action-btn"
+              onClick={() => setAddFilterModalOpen(true)}
+              title="Add Your Own Filter"
+            >
+              <Plus size={11} /> Add Your Own Filter
+            </button>
+          }
         >
-          {filters.length === 0 && dynamicFilters.length === 0 ? (
+          <BaseFilterBanner />
+          {requiredDimsMissing && (
+            <div className="dt-dim-required-banner">
+              <AlertTriangle size={13} />
+              <span>These filters are added through the configuration of the workspace template. You need to select values for these filters before loading data.</span>
+            </div>
+          )}
+          {filters.length === 0 && dynamicFilters.length === 0 && visibleDimSources.length === 0 ? (
             <div className="dt-filter-empty">
               <Filter size={20} strokeWidth={1.2} />
               <span>Drag columns here to add filters</span>
             </div>
           ) : (
             <div className="dt-filter-grid">
+              {visibleDimSources.map((ds) => (
+                <DimensionFilterChip
+                  key={ds.id}
+                  filterId={`dim-${ds.id}`}
+                  source={ds}
+                  onRemove={ds.required ? undefined : () => deactivateOptionalDim(ds.id)}
+                />
+              ))}
               {filters.map((f) =>
                 f.filterType === "date_range" || f.filterType === "date_relative"
                   ? <DateFilterChip key={f.id} filter={f} />
-                  : <FilterChip key={f.id} filter={f} />
+                  : f.filterType === "numeric_range"
+                    ? <NumericFilterChip key={f.id} filter={f} />
+                    : f.filterType === "free_text"
+                      ? <FreeTextFilterChip key={f.id} filter={f} />
+                      : f.filterType === "search_select"
+                        ? <SearchSelectChip key={f.id} filter={f} />
+                        : <FilterChip key={f.id} filter={f} />
               )}
             </div>
           )}
-          {dynamicFilters.length > 0 && <DynamicFilterPanel />}
+          <DynamicFilterPanel
+            hideAddButton
+            externalModalOpen={addFilterModalOpen}
+            onExternalModalClose={() => setAddFilterModalOpen(false)}
+          />
         </CollapsibleSection>
       </div>
 
-      {/* ─── Output Columns + Custom Columns ─── */}
-      <CollapsibleSection
-        title="Columns"
-        icon={<Columns3 size={14} />}
-        badge={
-          selectedOutputColumns.length > 0
-            ? <span className="dt-filter-badge">{selectedOutputColumns.length}</span>
-            : undefined
-        }
-        collapseKey={collapseVer}
-      >
-        <div className="dt-columns-row">
-          <div className="dt-columns-panel">
-            <ColumnPicker />
-          </div>
+      {/* ─── Compact Columns + Calculated Fields + Actions ─── */}
+      <div className="dt-compact-bar">
+        <div className="dt-compact-left">
+          <button
+            className="dt-compact-segment"
+            onClick={() => setColSelectorOpen(true)}
+            title={colTooltip}
+          >
+            <Columns3 size={13} />
+            <span className="dt-compact-label">
+              {selectedOutputColumns.length > 0 ? (
+                <>
+                  <strong>{selectedOutputColumns.length}</strong> output columns selected
+                  {dimCount > 0 && <span className="dt-compact-dim"><Type size={9} /> {dimCount}d</span>}
+                  {measCount > 0 && <span className="dt-compact-meas"><Hash size={9} /> {measCount}m</span>}
+                </>
+              ) : (
+                <span className="dt-compact-placeholder">0 output columns — click to select</span>
+              )}
+            </span>
+            <Pencil size={10} className="dt-compact-edit" />
+          </button>
+
           {showCustomCols && (
-            <div className="dt-columns-panel">
-              <FormulaBuilder />
-            </div>
-          )}
-        </div>
-      </CollapsibleSection>
-
-      {/* ─── Action bar ─── */}
-      <div className="data-tab-actionbar">
-        <div className="data-load-info">
-          {selectedOutputColumns.length > 0 && (
-            <span className="data-load-cols">{selectedOutputColumns.length} columns</span>
-          )}
-          {totalFilterCount > 0 && (
-            <span className="data-load-cols">{totalFilterCount} filter(s)</span>
+            <>
+              <span className="dt-compact-sep">•</span>
+              <button
+                className="dt-compact-segment"
+                onClick={() => setFormulaPanelOpen(true)}
+              >
+                <Sigma size={13} />
+                <span className="dt-compact-label">
+                  <strong>{formulaCount}</strong> calculated
+                </span>
+                <Pencil size={10} className="dt-compact-edit" />
+              </button>
+            </>
           )}
         </div>
 
-        <div className="data-load-actions">
+        <div className="dt-compact-right">
           {(selectedOutputColumns.length > 0 || totalFilterCount > 0) && (
-            <button className="colpick-btn" onClick={() => setShowSummary(true)}>
-              <ClipboardList size={12} /> Summary
+            <button
+              className="dt-compact-icon-btn"
+              onClick={() => setShowSummary(true)}
+              title="Selection Summary"
+            >
+              <ClipboardList size={13} />
             </button>
           )}
           {previewSql && (
-            <button className="colpick-btn" onClick={() => setShowPreviewSql(true)}>
-              <Code size={12} /> Preview SQL
-            </button>
-          )}
-          <button
-            className={`data-load-btn ${hasUnapplied ? "data-load-btn--pending" : ""}`}
-            onClick={handleLoadData}
-            disabled={!canLoad || baseDatasetLoading}
-          >
-            {baseDatasetLoading ? (
-              <><Loader2 size={14} className="spin" /> Loading…</>
-            ) : (
-              <><Play size={14} /> Load Data</>
-            )}
-          </button>
-          {baseDatasetLoading && (
             <button
-              className="data-load-btn data-load-btn--cancel"
-              onClick={handleCancelLoad}
+              className="dt-compact-icon-btn"
+              onClick={() => setShowPreviewSql(true)}
+              title="Preview SQL"
             >
-              <XCircle size={14} /> Cancel
+              <Code size={13} />
             </button>
           )}
 
-          {baseDataset && (
-            <button className="data-load-btn data-load-btn--go" onClick={handleGoToDashboard}>
-              <CheckCircle2 size={14} /> Go to Dashboard
+          {baseDatasetLoading ? (
+            <>
+              <button
+                className="dt-compact-load-btn dt-compact-load-btn--loading"
+                disabled
+              >
+                <Loader2 size={13} className="spin" /> Loading…
+              </button>
+              <button
+                className="dt-compact-icon-btn dt-compact-icon-btn--danger"
+                onClick={handleCancelLoad}
+                title="Cancel"
+              >
+                <XCircle size={13} />
+              </button>
+            </>
+          ) : (
+            <button
+              className={`dt-compact-load-btn ${hasUnapplied ? "dt-compact-load-btn--pending" : ""}`}
+              onClick={handleLoadData}
+              disabled={!canLoad}
+              title="Load Data (Ctrl+Enter)"
+            >
+              <Play size={12} /> Load Data
             </button>
           )}
         </div>
-
-        {baseDatasetError && (
-          <div className="data-load-error">
-            <AlertTriangle size={14} /> {baseDatasetError}
-          </div>
-        )}
       </div>
+
+      {baseDatasetError && (
+        <div className="data-load-error">
+          <AlertTriangle size={14} /> {baseDatasetError}
+        </div>
+      )}
 
       {/* ─── Loading Progress ─── */}
       {baseDatasetLoading && loadPhase !== "idle" && (
-        <LoadStepper phase={loadPhase} timings={stepTimings} />
+        <>
+          <LoadStepper phase={loadPhase} timings={stepTimings} />
+          <SkeletonTable rows={8} cols={Math.min(selectedOutputColumns.length || 5, 6)} />
+        </>
       )}
 
       {/* ─── Data Preview ─── */}
@@ -478,7 +652,7 @@ export default function DataTab() {
           icon={<TableIcon size={14} />}
           badge={<span className="dt-filter-badge">{baseDataset.rows.length} rows</span>}
         >
-          <DataPreview showDownload={showDownload} />
+          <DataPreview showDownload={showDownload} showExcel={showExcel} />
         </CollapsibleSection>
       )}
 
@@ -487,6 +661,12 @@ export default function DataTab() {
       )}
       {showSummary && (
         <SelectionSummaryModal onClose={() => setShowSummary(false)} />
+      )}
+      {colSelectorOpen && (
+        <ColumnSelectorModal onClose={() => setColSelectorOpen(false)} />
+      )}
+      {formulaPanelOpen && (
+        <FormulaBuilder externalOpen onExternalClose={() => setFormulaPanelOpen(false)} />
       )}
     </div>
   );

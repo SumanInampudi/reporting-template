@@ -5,6 +5,7 @@ import {
 import { useStore } from "@/hooks/useStore";
 import { useDraggableModal } from "@/hooks/useDraggableModal";
 import { runQuery } from "@/lib/api";
+import { quoteTableRef } from "@/lib/sqlBuilder";
 import { buildDynamicFilterWhere } from "@/lib/dynamicFilterSql";
 import { validateDynamicFilter, type DFValidationIssue } from "@/lib/dynamicFilterValidation";
 import FilterGroupCard, { makeCondition } from "./FilterGroupCard";
@@ -39,9 +40,12 @@ export default function DynamicFilterModal({ initial, onSave, onClose }: Props) 
   const { offset, handleMouseDown } = useDraggableModal();
 
   const { columns, selectedCatalog, selectedSchema, selectedTable } = useStore();
-  const colKey = selectedCatalog && selectedSchema && selectedTable
-    ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null;
-  const fqTable = colKey;
+  const isCustomQuery = useStore((s) => s.activeWorkspace?.datasource?.source_mode === "query");
+  const colKey = isCustomQuery
+    ? (selectedTable ? "__custom_source__" : null)
+    : (selectedCatalog && selectedSchema && selectedTable
+      ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null);
+  const fqTable = useStore((s) => s.effectiveTableRef)();
   const allCols: ColumnMeta[] = useMemo(
     () => (colKey ? columns[colKey] ?? [] : []),
     [colKey, columns],
@@ -88,10 +92,7 @@ export default function DynamicFilterModal({ initial, onSave, onClose }: Props) 
   const handleValidate = async () => {
     if (!fqTable || !whereClause || hasErrors) return;
     setServerValidation({ status: "loading" });
-    const parts = fqTable.split(".");
-    const quoted = parts.length === 3
-      ? `\`${parts[0]}\`.\`${parts[1]}\`.\`${parts[2]}\``
-      : fqTable;
+    const quoted = quoteTableRef(fqTable);
     const sql = `SELECT 1 FROM ${quoted} WHERE ${whereClause} LIMIT 0`;
     try {
       await runQuery(sql, 0);

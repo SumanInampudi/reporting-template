@@ -3,12 +3,12 @@
 # Local development helper for BI Excellence Dashboard.
 #
 # Usage:
-#   ./dev.sh              # kill → build frontend → start backend + frontend
-#   ./dev.sh build        # kill → rebuild frontend only (no servers)
-#   ./dev.sh restart      # kill → start backend + frontend (skip build)
-#   ./dev.sh stop         # kill all running processes
-#   ./dev.sh backend      # kill → start backend only
-#   ./dev.sh frontend     # kill → start frontend dev server only
+#   ./deploy-local.sh              # kill → build frontend → start backend + frontend
+#   ./deploy-local.sh build        # kill → rebuild frontend only (no servers)
+#   ./deploy-local.sh restart      # kill → start backend + frontend (skip build)
+#   ./deploy-local.sh stop         # kill all running processes
+#   ./deploy-local.sh backend      # kill → start backend only
+#   ./deploy-local.sh frontend     # kill → start frontend dev server only
 #
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -61,7 +61,9 @@ start_backend() {
     log "Starting backend on port ${BACKEND_PORT}..."
     cd "${SCRIPT_DIR}"
     source "${BACKEND_DIR}/.venv/bin/activate"
-    uvicorn backend.main:app --reload --port ${BACKEND_PORT} &
+    # No --reload: startup (including Delta metadata ensure_tables) runs once
+    # until you stop/restart this script — edit Python then restart backend.
+    uvicorn backend.main:app --host 0.0.0.0 --port ${BACKEND_PORT} &
     BACKEND_PID=$!
     ok "Backend started (PID ${BACKEND_PID})"
 }
@@ -137,7 +139,7 @@ case "${CMD}" in
         wait
         ;;
     *)
-        echo "Usage: ./dev.sh [all|build|restart|stop|backend|frontend]"
+        echo "Usage: ./deploy-local.sh [all|build|restart|stop|backend|frontend]"
         exit 1
         ;;
 esac

@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Database, Palette, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import DataSourceTab from "./sidebar/DataSourceTab";
 import DesignTab from "./sidebar/DesignTab";
-import PresetBar from "./presets/PresetBar";
 import { useStore } from "@/hooks/useStore";
-import type { SelfServiceFeature } from "@/types/dashboard";
 
 export default function Sidebar() {
-  const { activeTab, sidebarTab, setSidebarTab, sidebarCollapsed, toggleSidebar, activeWorkspace } = useStore();
+  const { activeTab, setActiveTab, sidebarTab, setSidebarTab, sidebarCollapsed, toggleSidebar } = useStore();
   const prevActiveTab = useRef(activeTab);
 
   useEffect(() => {
@@ -17,10 +15,15 @@ export default function Sidebar() {
     }
   }, [activeTab, setSidebarTab]);
 
-  const showPresets = useMemo(() => {
-    const raw = activeWorkspace?.features ?? [];
-    return new Set(raw as SelfServiceFeature[]).has("presets");
-  }, [activeWorkspace]);
+  const goToDataSource = () => {
+    setSidebarTab("datasource");
+    setActiveTab("data");
+  };
+
+  const goToDesign = () => {
+    setSidebarTab("design");
+    setActiveTab("dashboard");
+  };
 
   return (
     <aside className={`sidebar ${sidebarCollapsed ? "sidebar--collapsed" : ""}`}>
@@ -31,14 +34,14 @@ export default function Sidebar() {
           </button>
           <button
             className={`sidebar-rail-btn ${sidebarTab === "datasource" ? "sidebar-rail-btn--active" : ""}`}
-            onClick={() => { setSidebarTab("datasource"); if (sidebarCollapsed) toggleSidebar(); }}
+            onClick={() => { goToDataSource(); if (sidebarCollapsed) toggleSidebar(); }}
             title="Data Source"
           >
             <Database size={16} />
           </button>
           <button
             className={`sidebar-rail-btn ${sidebarTab === "design" ? "sidebar-rail-btn--active" : ""}`}
-            onClick={() => { setSidebarTab("design"); if (sidebarCollapsed) toggleSidebar(); }}
+            onClick={() => { goToDesign(); if (sidebarCollapsed) toggleSidebar(); }}
             title="Design"
           >
             <Palette size={16} />
@@ -49,13 +52,13 @@ export default function Sidebar() {
           <div className="sidebar-tabs">
             <button
               className={`sidebar-tab ${sidebarTab === "datasource" ? "active" : ""}`}
-              onClick={() => setSidebarTab("datasource")}
+              onClick={goToDataSource}
             >
               <Database size={14} /> Data Source
             </button>
             <button
               className={`sidebar-tab ${sidebarTab === "design" ? "active" : ""}`}
-              onClick={() => setSidebarTab("design")}
+              onClick={goToDesign}
             >
               <Palette size={14} /> Design
             </button>
@@ -65,7 +68,7 @@ export default function Sidebar() {
           </div>
 
           {sidebarTab === "datasource" ? (
-            <DataSourceTab showPresets={showPresets} />
+            <DataSourceTab />
           ) : (
             <DesignTab />
           )}

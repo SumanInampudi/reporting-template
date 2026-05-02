@@ -1,0 +1,15 @@
+/* ══════════════════════════════════════════════════
+   APP ROOT & LAYOUT
+   ══════════════════════════════════════════════════ */
+
+.app-root { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.app-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.app-main {
+  display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden;
+  background: var(--bg-app); color: var(--text-primary);
+  border-radius: var(--radius-sm) 0 0 0;
+}
+.app-tab-pane {
+  display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;
+}
+

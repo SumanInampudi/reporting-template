@@ -1,37 +1,66 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Loader2, RotateCcw, Search, BookOpen, Plus, Trash2, X, Type, Wand2, FileText,
-  Hash, Layers, FolderOpen, Sparkles, ChevronDown, ChevronRight, Check, Eye, EyeOff,
-  Sigma,
+  Loader2, RotateCcw, Search, BookOpen, X, Type, Wand2, FileText,
+  Hash, Layers, ChevronDown, Eye, EyeOff, CircleCheck, Info,
+  Sigma, Filter, ListFilter, Network, ShieldCheck,
 } from "lucide-react";
-import { useDraggableModal } from "@/hooks/useDraggableModal";
 import { fetchColumnsIn } from "@/lib/api";
 import {
-  generateAliases, getAbbreviations, setAbbreviations, getDefaultAbbreviations,
+  generateAliases, setAbbreviations,
   type AliasStrategy, type AbbreviationEntry,
 } from "@/lib/aliasUtils";
-import {
-  previewPatternMatches, detectColumnGroups, type SuggestedGroup,
-} from "@/lib/columnGroupResolver";
 import { NUMERIC_RE } from "@/lib/constants";
-import type { ColumnAggregation, ColumnGroupConfig, ColumnMeta, GroupingMode } from "@/types/dashboard";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import AbbreviationModal from "./AbbreviationModal";
+import AggregationSection from "./AggregationSection";
+import DimensionSourcesSection from "./DimensionSourcesSection";
+import GroupingSection from "./GroupingSection";
+import HierarchySection from "./HierarchySection";
+import ValidationRulesSection from "./ValidationRulesSection";
+import type { CascadeRule, ColumnAggregation, ColumnGroupConfig, ColumnMeta, DimensionHierarchy, DimensionSource, FreeTextValidationRule, JoinConfig } from "@/types/dashboard";
 
 interface Props {
   catalog: string;
   schema: string;
   table: string;
+  sourceMode?: string;
+  customQueryColumns?: ColumnMeta[];
   aliases: Record<string, string>;
   onAliasesChange: (aliases: Record<string, string>) => void;
+  columnTypeOverrides: Record<string, string>;
+  onColumnTypeOverridesChange: (overrides: Record<string, string>) => void;
   excludedColumns: string[];
   onExcludedColumnsChange: (cols: string[]) => void;
   columnGroups: ColumnGroupConfig;
   onColumnGroupsChange: (cfg: ColumnGroupConfig) => void;
   columnAggregations: Record<string, ColumnAggregation>;
   onColumnAggregationsChange: (aggs: Record<string, ColumnAggregation>) => void;
+  dimensionSources: DimensionSource[];
+  onDimensionSourcesChange: (sources: DimensionSource[]) => void;
+  cascadeRules: CascadeRule[];
+  onCascadeRulesChange: (rules: CascadeRule[]) => void;
+  abbreviations: AbbreviationEntry[];
+  onAbbreviationsChange: (entries: AbbreviationEntry[]) => void;
+  freeTextFilterColumns: string[];
+  onFreeTextFilterColumnsChange: (cols: string[]) => void;
+  searchSelectColumns: string[];
+  onSearchSelectColumnsChange: (cols: string[]) => void;
+  singleSelectColumns: string[];
+  onSingleSelectColumnsChange: (cols: string[]) => void;
+  freeTextValidationRules: FreeTextValidationRule[];
+  onFreeTextValidationRulesChange: (rules: FreeTextValidationRule[]) => void;
+  hierarchies: DimensionHierarchy[];
+  onHierarchiesChange: (h: DimensionHierarchy[]) => void;
+  joins: JoinConfig[];
 }
 
-type StepTab = "aliases" | "aggregations" | "grouping";
+const DATA_TYPE_OPTIONS = [
+  "STRING", "INT", "BIGINT", "DOUBLE", "FLOAT", "DECIMAL",
+  "BOOLEAN", "DATE", "TIMESTAMP",
+];
+
+type StepTab = "aliases" | "aggregations" | "grouping" | "dimensions" | "hierarchies" | "validation";
 
 const STRATEGY_OPTS: { id: AliasStrategy; label: string; icon: typeof Type; desc: string }[] = [
   { id: "title_case", label: "Title Case", icon: Type, desc: "Remove underscores, capitalize words" },
@@ -41,47 +70,108 @@ const STRATEGY_OPTS: { id: AliasStrategy; label: string; icon: typeof Type; desc
 
 export default function AliasStep({
   catalog, schema, table, aliases, onAliasesChange,
+  columnTypeOverrides, onColumnTypeOverridesChange,
   excludedColumns, onExcludedColumnsChange,
   columnGroups, onColumnGroupsChange,
   columnAggregations, onColumnAggregationsChange,
+  dimensionSources, onDimensionSourcesChange,
+  cascadeRules, onCascadeRulesChange,
+  abbreviations, onAbbreviationsChange,
+  freeTextFilterColumns, onFreeTextFilterColumnsChange,
+  searchSelectColumns, onSearchSelectColumnsChange,
+  singleSelectColumns, onSingleSelectColumnsChange,
+  freeTextValidationRules, onFreeTextValidationRulesChange,
+  hierarchies, onHierarchiesChange,
+  joins,
+  sourceMode, customQueryColumns,
 }: Props) {
   const [columns, setColumns] = useState<string[]>([]);
   const [columnMetas, setColumnMetas] = useState<ColumnMeta[]>([]);
+  const [partitionColumns, setPartitionColumns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [strategy, setStrategy] = useState<AliasStrategy>("title_case");
   const [search, setSearch] = useState("");
   const [showAbbrModal, setShowAbbrModal] = useState(false);
   const [activeTab, setActiveTab] = useState<StepTab>("aliases");
+  const [selectedCols, setSelectedCols] = useState<Set<string>>(new Set());
+
+  const joinsKey = joins.map((j) => j.table).filter(Boolean).sort().join(",");
+
+  const isCustomQueryMode = sourceMode === "query";
 
   useEffect(() => {
+    if (isCustomQueryMode) {
+      if (!customQueryColumns || customQueryColumns.length === 0) return;
+      const allCols: ColumnMeta[] = customQueryColumns.map((c) => ({
+        col_name: c.col_name,
+        data_type: c.data_type || "STRING",
+      }));
+      const names = allCols.map((c) => c.col_name);
+      setColumns(names);
+      setColumnMetas(allCols);
+      setPartitionColumns([]);
+      if (Object.keys(aliases).length === 0) {
+        onAliasesChange(generateAliases(names, "title_case"));
+      }
+      if (Object.keys(columnAggregations).length === 0) {
+        const noSumRe = /pct|percent|ratio|rate|avg|average|mean/i;
+        const defaultAggs: Record<string, ColumnAggregation> = {};
+        for (const c of allCols) {
+          if (NUMERIC_RE.test(c.data_type)) {
+            defaultAggs[c.col_name] = noSumRe.test(c.col_name) ? "NONE" : "SUM";
+          }
+        }
+        if (Object.keys(defaultAggs).length > 0) onColumnAggregationsChange(defaultAggs);
+      }
+      setLoading(false);
+      return;
+    }
+
     if (!catalog || !schema || !table) return;
     setLoading(true);
-    fetchColumnsIn(catalog, schema, table)
-      .then((cols) => {
-        const names = cols.map((c) => c.col_name);
-        setColumns(names);
-        setColumnMetas(cols);
-        if (Object.keys(aliases).length === 0) {
-          onAliasesChange(generateAliases(names, "title_case"));
-        }
-        if (Object.keys(columnAggregations).length === 0) {
-          const noSumRe = /pct|percent|ratio|rate|avg|average|mean/i;
-          const defaultAggs: Record<string, ColumnAggregation> = {};
-          for (const c of cols) {
-            if (NUMERIC_RE.test(c.data_type)) {
-              defaultAggs[c.col_name] = noSumRe.test(c.col_name) ? "NONE" : "SUM";
+
+    const fetchAll = async () => {
+      const res = await fetchColumnsIn(catalog, schema, table);
+      const primaryCols = res.columns.map((c) => ({ ...c, source_table: table }));
+      setPartitionColumns(res.partition_columns);
+
+      const allCols: ColumnMeta[] = [...primaryCols];
+      const validJoins = joins.filter((j) => j.table);
+      for (const j of validJoins) {
+        try {
+          const jRes = await fetchColumnsIn(catalog, schema, j.table);
+          for (const jc of jRes.columns) {
+            if (!allCols.some((c) => c.col_name === jc.col_name)) {
+              allCols.push({ ...jc, source_table: j.table });
             }
           }
-          if (Object.keys(defaultAggs).length > 0) onColumnAggregationsChange(defaultAggs);
+        } catch { /* skip failed join table fetches */ }
+      }
+
+      const names = allCols.map((c) => c.col_name);
+      setColumns(names);
+      setColumnMetas(allCols);
+      if (Object.keys(aliases).length === 0) {
+        onAliasesChange(generateAliases(names, "title_case"));
+      }
+      if (Object.keys(columnAggregations).length === 0) {
+        const noSumRe = /pct|percent|ratio|rate|avg|average|mean/i;
+        const defaultAggs: Record<string, ColumnAggregation> = {};
+        for (const c of allCols) {
+          if (NUMERIC_RE.test(c.data_type)) {
+            defaultAggs[c.col_name] = noSumRe.test(c.col_name) ? "NONE" : "SUM";
+          }
         }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [catalog, schema, table]);
+        if (Object.keys(defaultAggs).length > 0) onColumnAggregationsChange(defaultAggs);
+      }
+    };
+
+    fetchAll().catch(() => {}).finally(() => setLoading(false));
+  }, [isCustomQueryMode, customQueryColumns, catalog, schema, table, joinsKey]);
 
   const applyStrategy = (s: AliasStrategy) => {
     setStrategy(s);
-    onAliasesChange(generateAliases(columns, s));
+    onAliasesChange(generateAliases(columns, s, abbreviations));
   };
 
   const updateAlias = (col: string, value: string) => {
@@ -89,7 +179,7 @@ export default function AliasStep({
   };
 
   const resetAlias = (col: string) => {
-    onAliasesChange({ ...aliases, [col]: generateAliases([col], strategy)[col] });
+    onAliasesChange({ ...aliases, [col]: generateAliases([col], strategy, abbreviations)[col] });
   };
 
   const excludedSet = new Set(excludedColumns);
@@ -101,13 +191,130 @@ export default function AliasStep({
     }
   };
 
+  const colMetaMap = useMemo(() => {
+    const m = new Map<string, ColumnMeta>();
+    for (const c of columnMetas) m.set(c.col_name, c);
+    return m;
+  }, [columnMetas]);
+
+  const getOriginalType = (col: string): string => colMetaMap.get(col)?.data_type ?? "STRING";
+  const getEffectiveType = (col: string): string => columnTypeOverrides[col] ?? getOriginalType(col);
+  const getSourceTable = (col: string): string | undefined => colMetaMap.get(col)?.source_table;
+  const hasJoinedCols = joins.some((j) => j.table);
+
+  const handleTypeOverride = (col: string, newType: string) => {
+    const original = getOriginalType(col);
+    const next = { ...columnTypeOverrides };
+    if (newType === original) {
+      delete next[col];
+    } else {
+      next[col] = newType;
+    }
+    onColumnTypeOverridesChange(next);
+
+    const wasNumeric = NUMERIC_RE.test(original);
+    const isNowNumeric = NUMERIC_RE.test(newType);
+    if (!wasNumeric && isNowNumeric && !columnAggregations[col]) {
+      onColumnAggregationsChange({ ...columnAggregations, [col]: "SUM" });
+    }
+    if (wasNumeric && !isNowNumeric && columnAggregations[col]) {
+      const nextAggs = { ...columnAggregations };
+      delete nextAggs[col];
+      onColumnAggregationsChange(nextAggs);
+    }
+  };
+
+  const freeTextSet = useMemo(() => new Set(freeTextFilterColumns), [freeTextFilterColumns]);
+  const toggleFreeText = (col: string) => {
+    if (freeTextSet.has(col)) {
+      onFreeTextFilterColumnsChange(freeTextFilterColumns.filter((c) => c !== col));
+    } else {
+      onFreeTextFilterColumnsChange([...freeTextFilterColumns, col]);
+    }
+  };
+
+  const searchSelectSet = useMemo(() => new Set(searchSelectColumns), [searchSelectColumns]);
+  const toggleSearchSelect = (col: string) => {
+    if (searchSelectSet.has(col)) {
+      onSearchSelectColumnsChange(searchSelectColumns.filter((c) => c !== col));
+    } else {
+      onSearchSelectColumnsChange([...searchSelectColumns, col]);
+    }
+  };
+
+  const singleSelectSet = useMemo(() => new Set(singleSelectColumns), [singleSelectColumns]);
+  const toggleSingleSelect = (col: string) => {
+    if (singleSelectSet.has(col)) {
+      onSingleSelectColumnsChange(singleSelectColumns.filter((c) => c !== col));
+    } else {
+      onSingleSelectColumnsChange([...singleSelectColumns, col]);
+    }
+  };
+  const isStringType = (col: string) => {
+    const t = getEffectiveType(col).toUpperCase();
+    return t === "STRING" || t === "VARCHAR" || t === "CHAR" || t === "TEXT";
+  };
+
   const filtered = useMemo(() => {
     if (!search.trim()) return columns;
     const q = search.toLowerCase();
     return columns.filter(
-      (c) => c.toLowerCase().includes(q) || (aliases[c] ?? "").toLowerCase().includes(q),
+      (c) =>
+        c.toLowerCase().includes(q) ||
+        (aliases[c] ?? "").toLowerCase().includes(q) ||
+        (getSourceTable(c) ?? "").toLowerCase().includes(q),
     );
-  }, [columns, search, aliases]);
+  }, [columns, search, aliases, colMetaMap]);
+
+  const toggleSelectCol = (col: string) => {
+    setSelectedCols((prev) => {
+      const next = new Set(prev);
+      next.has(col) ? next.delete(col) : next.add(col);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    if (selectedCols.size === filtered.length) {
+      setSelectedCols(new Set());
+    } else {
+      setSelectedCols(new Set(filtered));
+    }
+  };
+  const bulkHide = () => {
+    const toExclude = [...selectedCols].filter((c) => !excludedSet.has(c));
+    if (toExclude.length > 0) onExcludedColumnsChange([...excludedColumns, ...toExclude]);
+    setSelectedCols(new Set());
+  };
+  const bulkShow = () => {
+    onExcludedColumnsChange(excludedColumns.filter((c) => !selectedCols.has(c)));
+    setSelectedCols(new Set());
+  };
+  const bulkSetType = (newType: string) => {
+    const next = { ...columnTypeOverrides };
+    const nextAggs = { ...columnAggregations };
+    for (const col of selectedCols) {
+      const original = getOriginalType(col);
+      if (newType === original) { delete next[col]; } else { next[col] = newType; }
+      const wasNumeric = NUMERIC_RE.test(original);
+      const isNowNumeric = NUMERIC_RE.test(newType);
+      if (!wasNumeric && isNowNumeric && !nextAggs[col]) nextAggs[col] = "SUM";
+      if (wasNumeric && !isNowNumeric && nextAggs[col]) delete nextAggs[col];
+    }
+    onColumnTypeOverridesChange(next);
+    onColumnAggregationsChange(nextAggs);
+    setSelectedCols(new Set());
+  };
+  const bulkToggleFreeText = (enable: boolean) => {
+    const stringCols = [...selectedCols].filter(isStringType);
+    if (enable) {
+      const toAdd = stringCols.filter((c) => !freeTextSet.has(c));
+      if (toAdd.length > 0) onFreeTextFilterColumnsChange([...freeTextFilterColumns, ...toAdd]);
+    } else {
+      onFreeTextFilterColumnsChange(freeTextFilterColumns.filter((c) => !selectedCols.has(c)));
+    }
+    setSelectedCols(new Set());
+  };
+  const [showBulkType, setShowBulkType] = useState(false);
 
   if (loading) {
     return (
@@ -126,6 +333,21 @@ export default function AliasStep({
     );
   }
 
+  const configuredRuleCount = freeTextValidationRules.filter((r) =>
+    r.min_length || r.max_length || r.exact_length || r.pattern || r.lpad_length || r.uppercase || r.trim
+  ).length;
+
+  const configured: Record<StepTab, boolean> = {
+    aliases: Object.keys(aliases).length > 0,
+    aggregations: Object.keys(columnAggregations).length > 0,
+    grouping: columnGroups.mode !== "measures_dimensions"
+      || (columnGroups.dimensionGroups ?? []).length > 0
+      || (columnGroups.measureGroups ?? []).length > 0,
+    dimensions: dimensionSources.length > 0,
+    hierarchies: hierarchies.length > 0 || cascadeRules.length > 0,
+    validation: configuredRuleCount > 0,
+  };
+
   return (
     <div className="alias-step">
       {/* ── Tab bar ── */}
@@ -135,18 +357,50 @@ export default function AliasStep({
           onClick={() => setActiveTab("aliases")}
         >
           <Type size={14} /> Display Names
+          {configured.aliases && <CircleCheck size={12} className="astep-tab-check" />}
         </button>
         <button
           className={`astep-tab${activeTab === "aggregations" ? " astep-tab--active" : ""}`}
           onClick={() => setActiveTab("aggregations")}
         >
           <Sigma size={14} /> Aggregations
+          {configured.aggregations && <CircleCheck size={12} className="astep-tab-check" />}
         </button>
         <button
           className={`astep-tab${activeTab === "grouping" ? " astep-tab--active" : ""}`}
           onClick={() => setActiveTab("grouping")}
         >
           <Layers size={14} /> Grouping
+          {configured.grouping && <CircleCheck size={12} className="astep-tab-check" />}
+        </button>
+        {freeTextFilterColumns.length > 0 && (
+          <button
+            className={`astep-tab${activeTab === "validation" ? " astep-tab--active" : ""}`}
+            onClick={() => setActiveTab("validation")}
+          >
+            <ShieldCheck size={14} /> Validation
+            {configured.validation
+              ? <><CircleCheck size={12} className="astep-tab-check" /><span className="astep-tab-badge">{configuredRuleCount}</span></>
+              : null}
+          </button>
+        )}
+        <button
+          className={`astep-tab${activeTab === "dimensions" ? " astep-tab--active" : ""}`}
+          onClick={() => setActiveTab("dimensions")}
+        >
+          <Filter size={14} /> Custom Filters
+          {configured.dimensions
+            ? <><CircleCheck size={12} className="astep-tab-check" /><span className="astep-tab-badge">{dimensionSources.length}</span></>
+            : null}
+        </button>
+        <button
+          className={`astep-tab${activeTab === "hierarchies" ? " astep-tab--active" : ""}`}
+          onClick={() => setActiveTab("hierarchies")}
+        >
+          <Network size={14} /> Hierarchies & Cascading
+          {configured.hierarchies
+            ? <><CircleCheck size={12} className="astep-tab-check" /><span className="astep-tab-badge">{hierarchies.length + cascadeRules.length}</span></>
+            : null}
         </button>
       </div>
 
@@ -193,23 +447,87 @@ export default function AliasStep({
             </span>
           </div>
 
+          {selectedCols.size > 0 && (
+            <div className="alias-bulk-bar">
+              <span className="alias-bulk-count">{selectedCols.size} selected</span>
+              <button className="alias-bulk-btn" onClick={bulkHide} title="Hide selected columns">
+                <EyeOff size={12} /> Hide
+              </button>
+              <button className="alias-bulk-btn" onClick={bulkShow} title="Show selected columns">
+                <Eye size={12} /> Show
+              </button>
+              <div className="alias-bulk-type-wrap">
+                <button className="alias-bulk-btn" onClick={() => setShowBulkType(!showBulkType)}>
+                  <Hash size={12} /> Set Type <ChevronDown size={10} />
+                </button>
+                {showBulkType && (
+                  <div className="alias-bulk-type-menu">
+                    {DATA_TYPE_OPTIONS.map((t) => (
+                      <button key={t} className="alias-bulk-type-opt" onClick={() => { bulkSetType(t); setShowBulkType(false); }}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button className="alias-bulk-btn" onClick={() => bulkToggleFreeText(true)} title="Enable free-text for selected string columns">
+                <ListFilter size={12} /> Free Text On
+              </button>
+              <button className="alias-bulk-btn" onClick={() => bulkToggleFreeText(false)} title="Disable free-text for selected">
+                <ListFilter size={12} /> Free Text Off
+              </button>
+              <button className="alias-bulk-btn alias-bulk-btn--clear" onClick={() => setSelectedCols(new Set())}>
+                <X size={12} /> Clear
+              </button>
+            </div>
+          )}
+
           <div className="alias-table-wrap">
             <table className="alias-table">
               <thead>
                 <tr>
+                  <th className="alias-th-check">
+                    <input
+                      type="checkbox"
+                      checked={filtered.length > 0 && selectedCols.size === filtered.length}
+                      onChange={toggleSelectAll}
+                      title="Select all visible"
+                    />
+                  </th>
                   <th className="alias-th-vis" title="Visibility — hidden columns won't appear in the workspace">
                     <Eye size={13} />
                   </th>
                   <th className="alias-th-col">Column Name</th>
+                  {hasJoinedCols && <th className="alias-th-source">Source Table</th>}
                   <th className="alias-th-alias">Display Alias</th>
+                  <th className="alias-th-type">Data Type</th>
+                  <th className="alias-th-freetext" title="When enabled, users type or paste filter values instead of picking from a dropdown list. Only available for string columns.">
+                    Free Text <span className="alias-th-help"><Info size={11} /></span>
+                  </th>
+                  <th className="alias-th-searchselect" title="When enabled, values are not loaded upfront. Users type to search and pick from server results. Ideal for columns with many distinct values.">
+                    Search &amp; Select <span className="alias-th-help"><Info size={11} /></span>
+                  </th>
+                  <th className="alias-th-singleselect" title="When enabled, users can only select one value at a time in the filter dropdown. The multi-select toggle will be hidden.">
+                    Single Only <span className="alias-th-help"><Info size={11} /></span>
+                  </th>
                   <th className="alias-th-action" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((col) => {
                   const isExcluded = excludedSet.has(col);
+                  const originalType = getOriginalType(col);
+                  const effectiveType = getEffectiveType(col);
+                  const isOverridden = !!columnTypeOverrides[col];
                   return (
-                    <tr key={col} className={`alias-row${isExcluded ? " alias-row--excluded" : ""}`}>
+                    <tr key={col} className={`alias-row${isExcluded ? " alias-row--excluded" : ""}${selectedCols.has(col) ? " alias-row--selected" : ""}`}>
+                      <td className="alias-col-check">
+                        <input
+                          type="checkbox"
+                          checked={selectedCols.has(col)}
+                          onChange={() => toggleSelectCol(col)}
+                        />
+                      </td>
                       <td className="alias-col-vis">
                         <button
                           className={`alias-vis-btn${isExcluded ? " alias-vis-btn--off" : ""}`}
@@ -220,6 +538,13 @@ export default function AliasStep({
                         </button>
                       </td>
                       <td className="alias-col-name" title={col}><code>{col}</code></td>
+                      {hasJoinedCols && (
+                        <td className="alias-col-source">
+                          <span className={`alias-source-badge${getSourceTable(col) !== table ? " alias-source-badge--joined" : ""}`}>
+                            {getSourceTable(col) ?? table}
+                          </span>
+                        </td>
+                      )}
                       <td className="alias-col-alias">
                         <input
                           className="alias-input"
@@ -227,6 +552,68 @@ export default function AliasStep({
                           onChange={(e) => updateAlias(col, e.target.value)}
                           disabled={isExcluded}
                         />
+                      </td>
+                      <td className="alias-col-type">
+                        <select
+                          className={`alias-type-select${isOverridden ? " alias-type-select--changed" : ""}`}
+                          value={effectiveType.toUpperCase()}
+                          onChange={(e) => handleTypeOverride(col, e.target.value)}
+                          disabled={isExcluded}
+                          title={isOverridden ? `Original: ${originalType}` : originalType}
+                        >
+                          <option value={originalType.toUpperCase()}>{originalType}</option>
+                          {DATA_TYPE_OPTIONS
+                            .filter((t) => t !== originalType.toUpperCase())
+                            .map((t) => <option key={t} value={t}>{t}</option>)
+                          }
+                        </select>
+                        {isOverridden && (
+                          <button
+                            className="alias-type-reset"
+                            onClick={() => handleTypeOverride(col, originalType)}
+                            title={`Reset to ${originalType}`}
+                          >
+                            <RotateCcw size={10} />
+                          </button>
+                        )}
+                      </td>
+                      <td className="alias-col-freetext">
+                        {isStringType(col) ? (
+                          <label className="alias-freetext-toggle" title="Users type/paste values instead of picking from a list">
+                            <input
+                              type="checkbox"
+                              checked={freeTextSet.has(col)}
+                              onChange={() => toggleFreeText(col)}
+                              disabled={isExcluded}
+                            />
+                          </label>
+                        ) : (
+                          <span className="alias-freetext-na">—</span>
+                        )}
+                      </td>
+                      <td className="alias-col-searchselect">
+                        {isStringType(col) ? (
+                          <label className="alias-searchselect-toggle" title={`Enable search & select for "${aliases[col] ?? col}" — values load on-demand as user types`}>
+                            <input
+                              type="checkbox"
+                              checked={searchSelectSet.has(col)}
+                              onChange={() => toggleSearchSelect(col)}
+                              disabled={isExcluded || freeTextSet.has(col)}
+                            />
+                          </label>
+                        ) : (
+                          <span className="alias-freetext-na">—</span>
+                        )}
+                      </td>
+                      <td className="alias-col-singleselect">
+                        <label className="alias-singleselect-toggle" title={`Force single-select for "${aliases[col] ?? col}" — users won't be able to switch to multi-select`}>
+                          <input
+                            type="checkbox"
+                            checked={singleSelectSet.has(col)}
+                            onChange={() => toggleSingleSelect(col)}
+                            disabled={isExcluded}
+                          />
+                        </label>
                       </td>
                       <td className="alias-col-action">
                         <button className="alias-reset-btn" onClick={() => resetAlias(col)} title="Reset to strategy default">
@@ -252,9 +639,11 @@ export default function AliasStep({
           </p>
           <AggregationSection
             columnMetas={columnMetas}
+            columnTypeOverrides={columnTypeOverrides}
             aliases={aliases}
             aggregations={columnAggregations}
             onChange={onColumnAggregationsChange}
+            primaryTable={table}
           />
         </div>
       )}
@@ -266,531 +655,72 @@ export default function AliasStep({
             Choose how columns are organized in selectors. Default splits by data type.
           </p>
           <GroupingSection
-            columns={columns}
+            columnMetas={columnMetas}
             config={columnGroups}
             onChange={onColumnGroupsChange}
           />
         </div>
       )}
 
+      {/* ── Dimensions tab ── */}
+      {activeTab === "dimensions" && (
+        <div className="astep-panel">
+          <DimensionSourcesSection
+            columns={columns}
+            aliases={aliases}
+            sources={dimensionSources}
+            onChange={onDimensionSourcesChange}
+            defaultCatalog={catalog}
+            defaultSchema={schema}
+            defaultTable={table}
+            partitionColumns={partitionColumns}
+          />
+        </div>
+      )}
+
+      {activeTab === "hierarchies" && (
+        <div className="astep-panel">
+          <HierarchySection
+            columns={columns}
+            columnMetas={columnMetas}
+            aliases={aliases}
+            catalog={catalog}
+            schema={schema}
+            table={table}
+            hierarchies={hierarchies}
+            onChange={onHierarchiesChange}
+            cascadeRules={cascadeRules}
+            onCascadeRulesChange={onCascadeRulesChange}
+            dimensionSources={dimensionSources}
+          />
+        </div>
+      )}
+
+      {activeTab === "validation" && (
+        <div className="astep-panel">
+          <ValidationRulesSection
+            freeTextColumns={freeTextFilterColumns}
+            rules={freeTextValidationRules}
+            onChange={onFreeTextValidationRulesChange}
+            aliases={aliases}
+          />
+        </div>
+      )}
+
+
       {showAbbrModal && createPortal(
         <AbbreviationModal
           onClose={() => setShowAbbrModal(false)}
-          onApply={() => {
-            onAliasesChange(generateAliases(columns, strategy));
+          initialEntries={abbreviations}
+          onApply={(entries) => {
+            onAbbreviationsChange(entries);
+            setAbbreviations(entries);
+            onAliasesChange(generateAliases(columns, strategy, entries));
             setShowAbbrModal(false);
           }}
         />,
         document.getElementById("themed-portal") ?? document.body,
       )}
-    </div>
-  );
-}
-
-/* ── Column Grouping Section ────────────────────── */
-
-function GroupingSection({ columns, config, onChange }: {
-  columns: string[];
-  config: ColumnGroupConfig;
-  onChange: (cfg: ColumnGroupConfig) => void;
-}) {
-  const mode = config.mode;
-  const groups = config.groups ?? [];
-  const [suggestions, setSuggestions] = useState<(SuggestedGroup & { selected: boolean })[] | null>(null);
-  const [colRefOpen, setColRefOpen] = useState(false);
-
-  const setMode = (m: GroupingMode) => {
-    onChange({ ...config, mode: m });
-    if (m === "custom" && groups.length === 0) setSuggestions(null);
-  };
-
-  const addGroup = () => {
-    const name = `Group ${groups.length + 1}`;
-    onChange({ ...config, mode: "custom", groups: [...groups, { name, patterns: [] }] });
-  };
-
-  const removeGroup = (idx: number) => {
-    const next = groups.filter((_, i) => i !== idx);
-    onChange({ ...config, groups: next, mode: next.length === 0 ? "measures_dimensions" : "custom" });
-  };
-
-  const renameGroup = (idx: number, name: string) => {
-    const next = groups.map((g, i) => (i === idx ? { ...g, name } : g));
-    onChange({ ...config, groups: next });
-  };
-
-  const addPatternFromInput = (gIdx: number, input: HTMLInputElement) => {
-    const p = input.value.trim();
-    if (!p) return;
-    const next = groups.map((g, i) =>
-      i === gIdx && !g.patterns.includes(p) ? { ...g, patterns: [...g.patterns, p] } : g,
-    );
-    onChange({ ...config, groups: next });
-    input.value = "";
-  };
-
-  const removePattern = (gIdx: number, pIdx: number) => {
-    const next = groups.map((g, i) =>
-      i === gIdx ? { ...g, patterns: g.patterns.filter((_, j) => j !== pIdx) } : g,
-    );
-    onChange({ ...config, groups: next });
-  };
-
-  const handleAutoDetect = () => {
-    const detected = detectColumnGroups(columns);
-    const sorted = detected.sort((a, b) => b.columns.length - a.columns.length);
-    const top = sorted.slice(0, 10);
-    setSuggestions(top.map((g) => ({ ...g, selected: false })));
-  };
-
-  const toggleSuggestion = (idx: number) => {
-    setSuggestions((prev) =>
-      prev?.map((s, i) => (i === idx ? { ...s, selected: !s.selected } : s)) ?? null,
-    );
-  };
-
-  const selectAllSuggestions = () => {
-    setSuggestions((prev) => prev?.map((s) => ({ ...s, selected: true })) ?? null);
-  };
-
-  const deselectAllSuggestions = () => {
-    setSuggestions((prev) => prev?.map((s) => ({ ...s, selected: false })) ?? null);
-  };
-
-  const applySuggestions = () => {
-    if (!suggestions) return;
-    const selected = suggestions.filter((s) => s.selected);
-    if (selected.length === 0) return;
-    const newGroups = selected.map((s) => ({ name: s.name, patterns: [s.pattern] }));
-    onChange({ mode: "custom", groups: newGroups });
-    setSuggestions(null);
-  };
-
-  const ungroupedCount = useMemo(() => {
-    if (groups.length === 0) return columns.length;
-    const allPatterns = groups.flatMap((g) => g.patterns);
-    const matched = previewPatternMatches(columns, allPatterns);
-    return columns.length - matched.length;
-  }, [columns, groups]);
-
-  return (
-    <div className="grouping-section">
-      <div className="grouping-mode-bar">
-        <button
-          className={`grouping-mode-btn${mode === "measures_dimensions" ? " grouping-mode-btn--active" : ""}`}
-          onClick={() => setMode("measures_dimensions")}
-        >
-          <Hash size={14} /> Measures & Dimensions
-        </button>
-        <button
-          className={`grouping-mode-btn${mode === "custom" ? " grouping-mode-btn--active" : ""}`}
-          onClick={() => setMode("custom")}
-        >
-          <FolderOpen size={14} /> Custom Groups
-        </button>
-      </div>
-
-      {mode === "measures_dimensions" && (
-        <p className="grouping-hint">
-          Columns will be split into <strong>Dimensions</strong> (text, date, boolean) and <strong>Measures</strong> (numeric) based on data type.
-        </p>
-      )}
-
-      {mode === "custom" && (
-        <div className="grouping-custom">
-          {/* Auto-detect button */}
-          {groups.length === 0 && !suggestions && (
-            <button className="grouping-detect-btn" onClick={handleAutoDetect}>
-              <Sparkles size={16} /> Auto-Detect Groups
-              <span className="grouping-detect-sub">Analyze column name patterns</span>
-            </button>
-          )}
-
-          {/* Suggested groups from auto-detect */}
-          {suggestions && (
-            <div className="grouping-suggestions">
-              <div className="grouping-suggestions-header">
-                <Sparkles size={14} />
-                <span>Top {suggestions.length} group{suggestions.length !== 1 ? "s" : ""} detected</span>
-                <span className="grouping-suggestions-hint">
-                  Select groups to keep &bull; Remaining columns go to &ldquo;Other&rdquo;
-                </span>
-              </div>
-              <div className="grouping-sg-select-bar">
-                <button className="grouping-sg-select-link" onClick={selectAllSuggestions}>Select all</button>
-                <span className="grouping-sg-select-sep">&bull;</span>
-                <button className="grouping-sg-select-link" onClick={deselectAllSuggestions}>Deselect all</button>
-                <span className="grouping-sg-select-count">
-                  {suggestions.filter((s) => s.selected).length} / {suggestions.length} selected
-                </span>
-              </div>
-              {suggestions.map((sg, idx) => (
-                <button
-                  key={idx}
-                  className={`grouping-sg-card${sg.selected ? " grouping-sg-card--selected" : ""}`}
-                  onClick={() => toggleSuggestion(idx)}
-                >
-                  <span className={`grouping-sg-check${sg.selected ? " grouping-sg-check--on" : ""}`}>
-                    {sg.selected && <Check size={10} />}
-                  </span>
-                  <div className="grouping-sg-info">
-                    <span className="grouping-sg-name">{sg.name}</span>
-                    <span className="grouping-sg-pattern">{sg.pattern}</span>
-                  </div>
-                  <span className="grouping-sg-count">{sg.columns.length} cols</span>
-                </button>
-              ))}
-              <div className="grouping-suggestions-actions">
-                <button
-                  className="grouping-detect-apply"
-                  onClick={applySuggestions}
-                  disabled={suggestions.filter((s) => s.selected).length === 0}
-                >
-                  <Check size={14} /> Apply Selected
-                </button>
-                <button className="grouping-detect-cancel" onClick={() => setSuggestions(null)}>
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Existing groups */}
-          {groups.map((group, gIdx) => {
-            const matched = previewPatternMatches(columns, group.patterns);
-            return (
-              <div key={gIdx} className="grouping-card">
-                <div className="grouping-card-header">
-                  <Layers size={14} />
-                  <input
-                    className="grouping-name-input"
-                    value={group.name}
-                    onChange={(e) => renameGroup(gIdx, e.target.value)}
-                    placeholder="Group name"
-                  />
-                  <span className="grouping-match-count">{matched.length} matched</span>
-                  <button className="grouping-remove-btn" onClick={() => removeGroup(gIdx)} title="Remove group">
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-
-                <div className="grouping-patterns">
-                  {group.patterns.map((p, pIdx) => (
-                    <span key={pIdx} className="grouping-pattern-tag">
-                      {p}
-                      <button onClick={() => removePattern(gIdx, pIdx)}><X size={10} /></button>
-                    </span>
-                  ))}
-                  <div className="grouping-pattern-add">
-                    <input
-                      id={`pat-input-${gIdx}`}
-                      className="grouping-pattern-input"
-                      placeholder="e.g. order_*"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") addPatternFromInput(gIdx, e.currentTarget);
-                      }}
-                    />
-                    <button
-                      className="grouping-pattern-add-btn"
-                      onClick={() => {
-                        const input = document.getElementById(`pat-input-${gIdx}`) as HTMLInputElement | null;
-                        if (input) addPatternFromInput(gIdx, input);
-                      }}
-                    >
-                      <Plus size={12} />
-                    </button>
-                  </div>
-                </div>
-
-                {matched.length > 0 && (
-                  <div className="grouping-preview">
-                    {matched.slice(0, 10).map((c) => (
-                      <span key={c} className="grouping-preview-tag">{c}</span>
-                    ))}
-                    {matched.length > 10 && (
-                      <span className="grouping-preview-tag grouping-preview-tag--more">
-                        +{matched.length - 10} more
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {groups.length > 0 && (
-            <>
-              <div className="grouping-actions-bar">
-                <button className="grouping-add-btn" onClick={addGroup}>
-                  <Plus size={14} /> Add Group
-                </button>
-                <button className="grouping-detect-small" onClick={handleAutoDetect} title="Re-analyze patterns">
-                  <Sparkles size={12} /> Re-Detect
-                </button>
-              </div>
-              <p className="grouping-hint">
-                {ungroupedCount > 0
-                  ? <>{ungroupedCount} column{ungroupedCount !== 1 ? "s" : ""} not matching any pattern will appear under "Other".</>
-                  : <>All columns are assigned to groups.</>}
-              </p>
-            </>
-          )}
-
-          {/* Column reference panel */}
-          <div className="grouping-colref">
-            <button className="grouping-colref-toggle" onClick={() => setColRefOpen((v) => !v)}>
-              {colRefOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-              Column Reference ({columns.length})
-            </button>
-            {colRefOpen && (
-              <div className="grouping-colref-list">
-                {columns.map((c) => (
-                  <span key={c} className="grouping-colref-tag">{c}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Aggregation Section ────────────────────────── */
-
-const AGG_OPTS: { id: ColumnAggregation; label: string }[] = [
-  { id: "SUM", label: "SUM" },
-  { id: "AVG", label: "AVG" },
-  { id: "COUNT", label: "COUNT" },
-  { id: "COUNT_DISTINCT", label: "DISTINCT" },
-  { id: "MIN", label: "MIN" },
-  { id: "MAX", label: "MAX" },
-  { id: "NONE", label: "NONE" },
-];
-
-function AggregationSection({ columnMetas, aliases, aggregations, onChange }: {
-  columnMetas: ColumnMeta[];
-  aliases: Record<string, string>;
-  aggregations: Record<string, ColumnAggregation>;
-  onChange: (aggs: Record<string, ColumnAggregation>) => void;
-}) {
-  const [search, setSearch] = useState("");
-
-  const measures = useMemo(
-    () => columnMetas.filter((c) => NUMERIC_RE.test(c.data_type)),
-    [columnMetas],
-  );
-  const dimensions = useMemo(
-    () => columnMetas.filter((c) => !NUMERIC_RE.test(c.data_type)),
-    [columnMetas],
-  );
-
-  const filteredMeasures = useMemo(() => {
-    if (!search.trim()) return measures;
-    const q = search.toLowerCase();
-    return measures.filter(
-      (c) => c.col_name.toLowerCase().includes(q) || (aliases[c.col_name] ?? "").toLowerCase().includes(q),
-    );
-  }, [measures, search, aliases]);
-
-  const setAgg = (col: string, agg: ColumnAggregation) => {
-    onChange({ ...aggregations, [col]: agg });
-  };
-
-  const removeAgg = (col: string) => {
-    onChange({ ...aggregations, [col]: "NONE" });
-  };
-
-  const setAllMeasures = (agg: ColumnAggregation) => {
-    const next = { ...aggregations };
-    for (const m of measures) next[m.col_name] = agg;
-    onChange(next);
-  };
-
-  return (
-    <div className="agg-section">
-      <div className="agg-toolbar">
-        <div className="agg-search-bar">
-          <Search size={14} />
-          <input
-            className="alias-search-input"
-            placeholder="Search measures..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="agg-bulk">
-          <span className="agg-bulk-label">Set all measures to:</span>
-          {AGG_OPTS.slice(0, 4).map((opt) => (
-            <button
-              key={opt.id}
-              className="agg-bulk-btn"
-              onClick={() => setAllMeasures(opt.id)}
-              title={`Set all measures to ${opt.label}`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="agg-summary">
-        <span className="agg-summary-item">
-          <Sigma size={13} /> <strong>{measures.length}</strong> measures
-        </span>
-        <span className="agg-summary-item">
-          <Hash size={13} /> <strong>{dimensions.length}</strong> dimensions
-        </span>
-        <span className="agg-summary-hint">
-          Dimensions are automatically included in GROUP BY ALL
-        </span>
-      </div>
-
-      <div className="alias-table-wrap">
-        <table className="alias-table">
-          <thead>
-            <tr>
-              <th className="alias-th-col">Column</th>
-              <th className="alias-th-alias">Display Name</th>
-              <th className="agg-th-type">Data Type</th>
-              <th className="agg-th-agg">Aggregation</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredMeasures.map((col) => {
-              const agg = aggregations[col.col_name] ?? "SUM";
-              return (
-                <tr key={col.col_name} className="alias-row">
-                  <td className="alias-col-name" title={col.col_name}><code>{col.col_name}</code></td>
-                  <td className="alias-col-alias">{aliases[col.col_name] ?? col.col_name}</td>
-                  <td className="agg-col-type"><code>{col.data_type}</code></td>
-                  <td className="agg-col-agg">
-                    <select
-                      className="agg-select"
-                      value={agg}
-                      onChange={(e) => setAgg(col.col_name, e.target.value as ColumnAggregation)}
-                    >
-                      {AGG_OPTS.map((opt) => (
-                        <option key={opt.id} value={opt.id}>{opt.label}</option>
-                      ))}
-                    </select>
-                    <button
-                      className="agg-remove-btn"
-                      onClick={() => removeAgg(col.col_name)}
-                      title="Remove aggregation (treat as dimension)"
-                    >
-                      <X size={12} />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {filteredMeasures.length === 0 && (
-              <tr>
-                <td colSpan={4} className="agg-empty">
-                  {measures.length === 0 ? "No numeric columns detected" : "No matches"}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-/* ── Abbreviation Dictionary Modal ───────────────── */
-
-function AbbreviationModal({ onClose, onApply }: { onClose: () => void; onApply: () => void }) {
-  const [entries, setEntries] = useState<AbbreviationEntry[]>(() => [...getAbbreviations()]);
-  const [newWord, setNewWord] = useState("");
-  const [newAbbr, setNewAbbr] = useState("");
-  const { offset, handleMouseDown } = useDraggableModal();
-
-  const updateEntry = (idx: number, field: "word" | "abbr", value: string) => {
-    setEntries((prev) => prev.map((e, i) => (i === idx ? { ...e, [field]: value } : e)));
-  };
-
-  const removeEntry = (idx: number) => {
-    setEntries((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  const addEntry = () => {
-    const w = newWord.trim().toLowerCase();
-    const a = newAbbr.trim();
-    if (!w || !a) return;
-    if (entries.some((e) => e.word.toLowerCase() === w)) return;
-    setEntries((prev) => [...prev, { word: w, abbr: a }]);
-    setNewWord("");
-    setNewAbbr("");
-  };
-
-  const handleApply = () => {
-    setAbbreviations(entries);
-    onApply();
-  };
-
-  const handleReset = () => {
-    setEntries(getDefaultAbbreviations());
-  };
-
-  return (
-    <div className="alias-modal-backdrop" onClick={onClose}>
-      <div className="alias-modal" onClick={(e) => e.stopPropagation()} style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}>
-        <div className="alias-modal-header drag-handle" onMouseDown={handleMouseDown}>
-          <h3 className="alias-modal-title"><BookOpen size={16} /> Abbreviation Dictionary</h3>
-          <button className="alias-modal-close" onClick={onClose}><X size={16} /></button>
-        </div>
-        <p className="alias-modal-desc">
-          Define word &rarr; abbreviation rules. When &quot;Smart Abbreviate&quot; is used, matching words are replaced.
-        </p>
-
-        <div className="abbr-table-wrap">
-          <table className="abbr-table">
-            <thead>
-              <tr>
-                <th>Word</th>
-                <th>Abbreviation</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry, i) => (
-                <tr key={i}>
-                  <td>
-                    <input className="abbr-input" value={entry.word} onChange={(e) => updateEntry(i, "word", e.target.value)} />
-                  </td>
-                  <td>
-                    <input className="abbr-input" value={entry.abbr} onChange={(e) => updateEntry(i, "abbr", e.target.value)} />
-                  </td>
-                  <td>
-                    <button className="abbr-remove" onClick={() => removeEntry(i)} title="Remove"><Trash2 size={12} /></button>
-                  </td>
-                </tr>
-              ))}
-              <tr className="abbr-add-row">
-                <td>
-                  <input className="abbr-input" placeholder="word" value={newWord} onChange={(e) => setNewWord(e.target.value)} />
-                </td>
-                <td>
-                  <input className="abbr-input" placeholder="abbr" value={newAbbr} onChange={(e) => setNewAbbr(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addEntry()} />
-                </td>
-                <td>
-                  <button className="abbr-add-btn" onClick={addEntry} title="Add"><Plus size={12} /></button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div className="alias-modal-footer">
-          <button className="alias-modal-reset" onClick={handleReset}>Reset to Defaults</button>
-          <div className="alias-modal-actions">
-            <button className="alias-modal-cancel" onClick={onClose}>Cancel</button>
-            <button className="alias-modal-apply" onClick={handleApply}>Apply &amp; Regenerate</button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

@@ -5,11 +5,17 @@ import { useDraggableModal } from "@/hooks/useDraggableModal";
 import {
   fetchSharedFormulas, createSharedFormula, updateSharedFormula, deleteSharedFormula,
 } from "@/lib/api";
+import { toast } from "@/components/ui/Toast";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import FormulaModal from "./FormulaModal";
 import type { FormulaColumn, SharedFormulaColumn } from "@/types/dashboard";
 
-export default function FormulaBuilder() {
+interface BuilderProps {
+  externalOpen?: boolean;
+  onExternalClose?: () => void;
+}
+
+export default function FormulaBuilder({ externalOpen, onExternalClose }: BuilderProps) {
   const {
     formulaColumns, addFormulaColumn, updateFormulaColumn, removeFormulaColumn,
     selectedOutputColumns, toggleOutputColumn, setOutputColumns,
@@ -17,6 +23,7 @@ export default function FormulaBuilder() {
   } = useStore();
 
   const [panelOpen, setPanelOpen] = useState(false);
+  const isPanelOpen = panelOpen || !!externalOpen;
   const [modalOpen, setModalOpen] = useState(false);
   const [editingFc, setEditingFc] = useState<FormulaColumn | null>(null);
   const [editingSf, setEditingSf] = useState<SharedFormulaColumn | null>(null);
@@ -35,17 +42,22 @@ export default function FormulaBuilder() {
     try {
       const list = await fetchSharedFormulas(wsId);
       setSharedFormulas(list);
-    } catch { /* ignore */ }
+    } catch { toast.error("Failed to load shared formulas"); }
   }, [wsId, setSharedFormulas]);
 
   useEffect(() => { loadShared(); }, [loadShared]);
 
+  const closePanel = useCallback(() => {
+    setPanelOpen(false);
+    onExternalClose?.();
+  }, [onExternalClose]);
+
   useEffect(() => {
-    if (!panelOpen) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setPanelOpen(false); };
+    if (!isPanelOpen) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") closePanel(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [panelOpen]);
+  }, [isPanelOpen, closePanel]);
 
   const handleAdd = () => {
     setEditingFc(null);
@@ -108,7 +120,7 @@ export default function FormulaBuilder() {
         alias: fc.alias, expression: fc.expression, data_type: fc.dataType,
       });
       await loadShared();
-    } catch { /* ignore */ }
+    } catch { toast.error("Failed to share formula"); }
     setSharing(false);
   };
 
@@ -122,7 +134,7 @@ export default function FormulaBuilder() {
         await deleteSharedFormula(wsId, deleteTarget.sf.id);
         setSharedFormulas(sharedFormulas.filter((f) => f.id !== deleteTarget.sf.id));
       }
-    } catch { /* ignore */ }
+    } catch { toast.error("Failed to delete formula"); }
     setDeleting(false);
     setDeleteTarget(null);
   };
@@ -131,20 +143,22 @@ export default function FormulaBuilder() {
 
   return (
     <>
-      {/* ─── Compact trigger button ─── */}
-      <button className="fc-trigger" onClick={() => setPanelOpen(true)}>
-        <Sigma size={14} />
-        <span>Calculated Columns</span>
-        {totalCount > 0 && <span className="fc-trigger-count">{totalCount}</span>}
-      </button>
+      {/* ─── Compact trigger button (hidden when externally controlled) ─── */}
+      {!externalOpen && (
+        <button className="fc-trigger" onClick={() => setPanelOpen(true)}>
+          <Sigma size={14} />
+          <span>Calculated Fields</span>
+          {totalCount > 0 && <span className="fc-trigger-count">{totalCount}</span>}
+        </button>
+      )}
 
       {/* ─── Management panel (modal overlay) ─── */}
-      {panelOpen && (
-        <div className="fc-overlay" ref={overlayRef} onClick={(e) => e.target === overlayRef.current && setPanelOpen(false)}>
+      {isPanelOpen && (
+        <div className="fc-overlay" ref={overlayRef} onClick={(e) => e.target === overlayRef.current && closePanel()}>
           <div className="fc-panel" style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}>
             <div className="fc-panel-header drag-handle" onMouseDown={handleMouseDown}>
-              <span className="fc-panel-title"><Sigma size={16} /> Calculated Columns</span>
-              <button className="fc-panel-close" onClick={() => setPanelOpen(false)}><X size={16} /></button>
+              <span className="fc-panel-title"><Sigma size={16} /> Calculated Fields</span>
+              <button className="fc-panel-close" onClick={closePanel}><X size={16} /></button>
             </div>
 
             <div className="fc-panel-body">

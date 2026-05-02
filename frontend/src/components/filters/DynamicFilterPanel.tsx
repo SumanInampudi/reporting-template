@@ -5,10 +5,18 @@ import DynamicFilterChip from "./DynamicFilterChip";
 import DynamicFilterModal from "./DynamicFilterModal";
 import type { DynamicFilter } from "@/types/dashboard";
 
-export default function DynamicFilterPanel() {
+interface Props {
+  hideAddButton?: boolean;
+  externalModalOpen?: boolean;
+  onExternalModalClose?: () => void;
+}
+
+export default function DynamicFilterPanel({ hideAddButton, externalModalOpen, onExternalModalClose }: Props) {
   const { dynamicFilters, addDynamicFilter, updateDynamicFilter, removeDynamicFilter, toggleDynamicFilter } = useStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<DynamicFilter | null>(null);
+
+  const isModalOpen = modalOpen || (externalModalOpen && !editing);
 
   const handleAdd = () => {
     setEditing(null);
@@ -28,6 +36,13 @@ export default function DynamicFilterPanel() {
     }
     setModalOpen(false);
     setEditing(null);
+    onExternalModalClose?.();
+  };
+
+  const handleClose = () => {
+    setModalOpen(false);
+    setEditing(null);
+    onExternalModalClose?.();
   };
 
   return (
@@ -46,15 +61,17 @@ export default function DynamicFilterPanel() {
         </div>
       )}
 
-      <button className="df-add-rule-btn" onClick={handleAdd}>
-        <Plus size={12} /> Add Your Own Filter
-      </button>
+      {!hideAddButton && (
+        <button className="df-add-rule-btn" onClick={handleAdd}>
+          <Plus size={12} /> Add Your Own Filter
+        </button>
+      )}
 
-      {modalOpen && (
+      {isModalOpen && (
         <DynamicFilterModal
           initial={editing ?? undefined}
           onSave={handleSave}
-          onClose={() => { setModalOpen(false); setEditing(null); }}
+          onClose={handleClose}
         />
       )}
     </div>

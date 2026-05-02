@@ -4,21 +4,33 @@
 # Quick start for any team:
 #   1. Install Databricks CLI >= 0.250.0
 #   2. Configure a profile:  databricks configure --profile <name>
-#   3. Deploy:
-#        databricks bundle deploy -t dev \
-#          --var warehouse_id=<your-warehouse-id>
-#   4. Start the app:
-#        databricks bundle run bi_dashboard -t dev
+#   3. Edit the TWO lines marked ✏️ below (app_slug + team_name)
+#   4. Fill in warehouse IDs and schemas in the targets section
+#   5. Deploy:
+#        ./deploy-databricks.sh              # dev (default)
+#        ./deploy-databricks.sh prod         # production
 #
-# All team-specific values are provided at deploy time via --var flags
-# or in a local .databricks/ override (gitignored).
+# No --var flags needed — everything is configured in this file.
 
 bundle:
-  name: bi_excellence_dashboard
+  name: scpt_excellence_bi-suite
+
+# ══════════════════════════════════════════════════════════════════════
+#  TEAM IDENTITY — Change these two lines for your team
+# ══════════════════════════════════════════════════════════════════════
 
 variables:
+  app_slug:
+    description: "URL-safe app identifier (lowercase, hyphens). Used as the Databricks App name."
+    default: "zoom360"                       # ✏️ Change this (e.g. "zaominout", "emea-orderbook")
+  team_name:
+    description: "Display name shown in the nav bar, hero banner, and browser tab"
+    default: "ZOOM 360"                      # ✏️ Change this (e.g. "Zaomin Out Analytics")
+
+# ── Other variables (most teams use the defaults or set per-target) ──
+
   warehouse_id:
-    description: "SQL Warehouse ID (required)"
+    description: "SQL Warehouse ID — set per target below"
   catalog:
     description: "Default Unity Catalog name"
     default: "main"
@@ -26,28 +38,28 @@ variables:
     description: "Default schema"
     default: "default"
   log_level:
-    description: "Python log level"
+    description: "Python log level (DEBUG, INFO, WARNING, ERROR)"
     default: "INFO"
   default_row_limit:
-    description: "Default row limit for queries (0 = no limit, driven by workspace config)"
+    description: "Default max rows per query (0 = no limit, driven by workspace config)"
     default: "0"
   max_row_limit:
-    description: "Maximum row limit for queries (0 = no limit, driven by workspace config)"
+    description: "Hard ceiling on rows (0 = no ceiling)"
     default: "0"
   query_timeout_seconds:
     description: "SQL query timeout in seconds"
     default: "300"
   allowed_catalogs:
-    description: "Comma-separated list of catalogs visible in the app ('none' = show all)"
+    description: "Comma-separated catalogs visible in the wizard ('none' = show all)"
     default: "none"
   secret_scope:
-    description: "Databricks secret scope holding the SP fallback token ('none' = disabled)"
+    description: "Databricks secret scope for SP fallback token ('none' = disabled)"
     default: "none"
   secret_key:
     description: "Key within the secret scope for the SP token"
     default: "sp-token"
   admin_role_suffixes:
-    description: "Comma-separated group name suffixes that grant admin role ('none' = everyone is admin)"
+    description: "Comma-separated group suffixes that grant admin ('none' = everyone is admin)"
     default: "none"
   storage_backend:
     description: "Persistence backend: 'delta' (recommended) or 'yaml'"
@@ -62,7 +74,7 @@ variables:
 resources:
   apps:
     bi_dashboard:
-      name: "bi-excellence-${bundle.target}"
+      name: "${var.app_slug}-${bundle.target}"
       source_code_path: .
       description: "BI Excellence Self-Service Dashboard"
 
@@ -72,6 +84,8 @@ resources:
           - -c
           - "cd frontend && npm install --include=dev && npm run build && cd .. && uvicorn backend.main:app"
         env:
+          - name: TEAM_NAME
+            value: ${var.team_name}
           - name: DATABRICKS_WAREHOUSE_ID
             value: ${var.warehouse_id}
           - name: DEFAULT_CATALOG
@@ -84,14 +98,6 @@ resources:
             value: "false"
           - name: AUTH_MODE
             value: "oauth"
-          - name: ENABLE_CHARTS
-            value: "true"
-          - name: ENABLE_PRESETS
-            value: "true"
-          - name: ENABLE_SQL_PREVIEW
-            value: "true"
-          - name: ENABLE_CSV_EXPORT
-            value: "true"
           - name: DEFAULT_ROW_LIMIT
             value: ${var.default_row_limit}
           - name: MAX_ROW_LIMIT
@@ -119,11 +125,25 @@ resources:
         - level: CAN_USE
           group_name: users
 
+# ══════════════════════════════════════════════════════════════════════
+#  TARGETS — Environment-specific overrides
+# ══════════════════════════════════════════════════════════════════════
+#  Fill in warehouse_id for each environment.
+#  team_name is inherited from the default above; override in dev to
+#  add a suffix so users can tell environments apart.
+#
+#  Deploy:  ./deploy-databricks.sh          (dev)
+#           ./deploy-databricks.sh prod     (prod)
+# ══════════════════════════════════════════════════════════════════════
+
 targets:
   dev:
     mode: development
     default: true
     variables:
+      warehouse_id: "2935e9de8717ea29"
+      team_name: "ZOOM 360 - Dev"
+      log_level: "INFO"
       allowed_catalogs: "development,published_analytics,published_domain,non_published_analytics,non_published_domain"
       secret_scope: "obcd-app-secrets-non-prod"
       secret_key: "sp-token"
@@ -133,9 +153,12 @@ targets:
   prod:
     mode: production
     variables:
+      warehouse_id: "2935e9de8717ea29"
+      log_level: "WARNING"
       allowed_catalogs: "published_analytics,published_domain,non_published_analytics,non_published_domain"
       secret_scope: "obcd-app-secrets"
       secret_key: "sp-token"
+      admin_role_suffixes: "DataAdmin,ClusterAdmin"
       app_metadata_catalog: "non_published_analytics"
       app_metadata_schema: "zoomio_analytical_foundation"
     permissions:

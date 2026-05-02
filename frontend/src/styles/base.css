@@ -1,0 +1,330 @@
+/* ┌──────────────────────────────────────────────────
+   │  BI Excellence Suite — Master Stylesheet
+   │  TABLE OF CONTENTS
+   │──────────────────────────────────────────────────
+   │  Line    Section
+   │  ────    ───────────────────────────────
+   │    30    DENSITY SCALING (tokens, sizing)
+   │    41    COLOR THEMES (nike, nike-light)
+   │   256    BASE RESET & BODY
+   │   279    HOME PAGE (hero, cards, grid)
+   │   471    SETUP WIZARD (steps, tabs, forms)
+   │  2551    APP ROOT & LAYOUT
+   │  2843    SIDEBAR (datasource, groups, drag)
+   │  3128    SPINNER & SKELETON
+   │  3203    CANVAS (grid, KPI, design)
+   │  3431    CHART WIDGET
+   │  3577    SETTINGS PANEL
+   │  3781    MAIN TABS
+   │  3800    DATA TAB (filters, table, export)
+   │  5189    DYNAMIC FILTER BUILDER
+   │  6251    DATA TABLE POLISH
+   │  6281    COLLAPSIBLE SIDEBAR
+   │  6316    STATUS BAR
+   │  6395    FOCUS MODE
+   │  6418    MICRO-ANIMATIONS
+   │  6636    USER AVATAR
+   │  6870    DOCUMENTATION PAGE
+   └────────────────────────────────────────────────── */
+
+/* ══════════════════════════════════════════════════
+   DENSITY SCALING — root font-size drives all rem
+   ══════════════════════════════════════════════════ */
+
+:root, [data-density="comfortable"] { font-size: 16px; }
+[data-density="compact"]    { font-size: 14px; }
+[data-density="spacious"]   { font-size: 18px; }
+
+/* ── Size tokens (rem-based, scale with density) ── */
+
+:root {
+  --font-2xs: 0.65rem;      /* ~10px */
+  --font-xs: 0.75rem;       /* ~12px */
+  --font-sm: 0.8125rem;     /* ~13px */
+  --font-base: 0.875rem;    /* ~14px */
+  --font-md: 0.9375rem;     /* ~15px */
+  --font-lg: 1.0625rem;     /* ~17px */
+  --font-xl: 1.25rem;       /* ~20px */
+  --font-2xl: 1.5rem;       /* ~24px */
+  --font-3xl: 2rem;         /* ~32px */
+  --font-hero: 2.75rem;     /* ~44px */
+
+  --space-1: 0.125rem;
+  --space-2: 0.25rem;
+  --space-3: 0.375rem;
+  --space-4: 0.5rem;
+  --space-5: 0.625rem;
+  --space-6: 0.75rem;
+  --space-8: 1rem;
+  --space-10: 1.25rem;
+  --space-12: 1.5rem;
+
+  --sidebar-w: 20rem;
+  --header-h: 3.5rem;
+  --icon-sm: 0.875rem;
+  --icon-md: 1rem;
+
+  --font-nike: "Helvetica Neue", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* ══════════════════════════════════════════════════
+   COLOR THEMES
+   ══════════════════════════════════════════════════ */
+
+/* ── Dark — neutral zinc tones, professional blue accent ── */
+
+:root,
+[data-theme="dark"] {
+  --bg-app: #09090b;
+  --bg-sidebar: #111113;
+  --bg-card: #18181b;
+  --bg-card-hover: #27272a;
+  --bg-input: #09090b;
+  --border: #27272a;
+  --border-focus: #3b82f6;
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #52525b;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-subtle: rgba(59, 130, 246, 0.10);
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #eab308;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Light — clean warm grays, distinct sidebar ───── */
+
+[data-theme="light"] {
+  --bg-app: #f4f4f5;
+  --bg-sidebar: #fafafa;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f4f4f5;
+  --bg-input: #ececed;
+  --border: #d4d4d8;
+  --border-focus: #2563eb;
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-muted: #71717a;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-subtle: rgba(37, 99, 235, 0.07);
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* ── Nike — brand orange on warm neutral blacks ──── */
+
+[data-theme="nike"] {
+  --bg-app: #0a0a0a;
+  --bg-sidebar: #171717;
+  --bg-card: #1c1c1c;
+  --bg-card-hover: #262626;
+  --bg-input: #0a0a0a;
+  --border: #303030;
+  --border-focus: #FA5400;
+  --text-primary: #fafafa;
+  --text-secondary: #a3a3a3;
+  --text-muted: #525252;
+  --accent: #FA5400;
+  --accent-hover: #ff7a33;
+  --accent-subtle: rgba(250, 84, 0, 0.16);
+  --accent-rgb: 250, 84, 0;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --radius: 4px;
+  --radius-sm: 2px;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Nike Light — warm sand tones, burnt orange accent ── */
+
+[data-theme="nike-light"] {
+  --bg-app: #ffffff;
+  --bg-sidebar: #f7f7f7;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f5f5f5;
+  --bg-input: #f5f5f5;
+  --border: #e0e0e0;
+  --border-focus: #111111;
+  --text-primary: #111111;
+  --text-secondary: #444444;
+  --text-muted: #888888;
+  --accent: #111111;
+  --accent-hover: #333333;
+  --accent-subtle: rgba(0, 0, 0, 0.04);
+  --accent-rgb: 17, 17, 17;
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --radius: 4px;
+  --radius-sm: 2px;
+  --shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* ── Midnight — deep navy, warm indigo accent ────── */
+
+[data-theme="midnight"] {
+  --bg-app: #0c0f1a;
+  --bg-sidebar: #111628;
+  --bg-card: #161d35;
+  --bg-card-hover: #1e2744;
+  --bg-input: #0a0d16;
+  --border: #232e52;
+  --border-focus: #818cf8;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-subtle: rgba(129, 140, 248, 0.12);
+  --danger: #f87171;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Slate — refined light, warm stone sidebar ───── */
+
+[data-theme="slate"] {
+  --bg-app: #f8fafc;
+  --bg-sidebar: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-input: #e8edf3;
+  --border: #c0c9d6;
+  --border-focus: #7c3aed;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-subtle: rgba(124, 58, 237, 0.07);
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* ── Minimal — monochrome, blue accent for actions ── */
+
+[data-theme="minimal"] {
+  --bg-app: #fafafa;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f5f5f5;
+  --bg-input: #ededed;
+  --border: #d4d4d4;
+  --border-focus: #2563eb;
+  --text-primary: #171717;
+  --text-secondary: #404040;
+  --text-muted: #737373;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-subtle: rgba(37, 99, 235, 0.06);
+  --danger: #dc2626;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* ── Nord — muted arctic, frost-blue accent ──────── */
+
+[data-theme="nord"] {
+  --bg-app: #2e3440;
+  --bg-sidebar: #3b4252;
+  --bg-card: #434c5e;
+  --bg-card-hover: #4c566a;
+  --bg-input: #2e3440;
+  --border: #4c566a;
+  --border-focus: #88c0d0;
+  --text-primary: #eceff4;
+  --text-secondary: #d8dee9;
+  --text-muted: #7b88a1;
+  --accent: #88c0d0;
+  --accent-hover: #8fbcbb;
+  --accent-subtle: rgba(136, 192, 208, 0.12);
+  --danger: #bf616a;
+  --success: #a3be8c;
+  --warning: #ebcb8b;
+  --radius: 6px;
+  --radius-sm: 3px;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Corporate — warm grays, Databricks-red accent ── */
+
+[data-theme="corporate"] {
+  --bg-app: #0f0f0f;
+  --bg-sidebar: #1a1a1a;
+  --bg-card: #212121;
+  --bg-card-hover: #2c2c2c;
+  --bg-input: #0f0f0f;
+  --border: #333333;
+  --border-focus: #e04332;
+  --text-primary: #f5f5f5;
+  --text-secondary: #a3a3a3;
+  --text-muted: #5c5c5c;
+  --accent: #e04332;
+  --accent-hover: #ef5a4a;
+  --accent-subtle: rgba(224, 67, 50, 0.12);
+  --danger: #f87171;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --radius: 6px;
+  --radius-sm: 3px;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* ══════════════════════════════════════════════════
+   BASE RESET & BODY
+   ══════════════════════════════════════════════════ */
+
+*,
+*::before,
+*::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%; overflow: hidden;
+}
+body {
+  font-family: var(--font-nike);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-nike);
+  letter-spacing: -0.02em;
+}
+
+/* ── Global button normalizer ── */
+button,
+[role="button"] {
+  font-family: var(--font-nike);
+  font-weight: 600;
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+

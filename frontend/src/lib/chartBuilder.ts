@@ -1,4 +1,5 @@
-import type { Aggregation, ChartSettings, ColorScheme, DashboardWidget, FilterItem, NumberFormat, SortOrder } from "@/types/dashboard";
+import type { Aggregation, BaseFilter, ChartSettings, ColorScheme, DashboardWidget, FilterItem, NumberFormat, SortOrder } from "@/types/dashboard";
+import { buildBaseFilterClauses, quoteTableRef } from "./sqlBuilder";
 import { COLOR_PALETTES, GRADIENT_FILLS } from "./constants";
 
 interface ChartThemeColors {
@@ -47,12 +48,14 @@ interface PivotResult {
 
 function pivotGroupBy(widget: DashboardWidget): PivotResult | null {
   const { data, binding } = widget;
-  if (!data || !binding.xColumn || !binding.groupBy || binding.yColumns.length === 0) return null;
+  const xCol = binding.xColumns[0];
+  const gCols = binding.groupBy;
+  if (!data || !xCol || gCols.length === 0 || binding.yColumns.length === 0) return null;
 
-  const xIdx = data.columns.indexOf(binding.xColumn);
-  const gIdx = data.columns.indexOf(binding.groupBy);
+  const xIdx = data.columns.indexOf(xCol);
+  const gIdxs = gCols.map((c) => data.columns.indexOf(c)).filter((i) => i >= 0);
   const yIdx = data.columns.indexOf(binding.yColumns[0]);
-  if (xIdx === -1 || gIdx === -1 || yIdx === -1) return null;
+  if (xIdx === -1 || gIdxs.length === 0 || yIdx === -1) return null;
 
   const xSet = new Set<string>();
   const gSet = new Set<string>();
@@ -60,7 +63,7 @@ function pivotGroupBy(widget: DashboardWidget): PivotResult | null {
 
   for (const row of data.rows) {
     const x = String(row[xIdx] ?? "");
-    const g = String(row[gIdx] ?? "");
+    const g = gIdxs.map((i) => String(row[i] ?? "")).join(" / ");
     const v = Number(row[yIdx]) || 0;
     xSet.add(x);
     gSet.add(g);
@@ -83,7 +86,7 @@ function pivotGroupBy(widget: DashboardWidget): PivotResult | null {
 
 export function buildEChartsOption(widget: DashboardWidget, colorScheme: ColorScheme) {
   const { chartType, binding, data, settings } = widget;
-  if (!data || !binding.xColumn || binding.yColumns.length === 0) {
+  if (!data || binding.xColumns.length === 0 || binding.yColumns.length === 0) {
     if (chartType === "gauge" && data && binding.yColumns.length > 0) {
       return buildGaugeOption(widget, colorScheme);
     }
@@ -99,10 +102,17 @@ export function buildEChartsOption(widget: DashboardWidget, colorScheme: ColorSc
   const { textColor, borderColor, bgColor, tooltipText } = getChartThemeColors(colorScheme);
   const yFmt = numberFormatter(settings.numberFormat);
 
-  const pivot = binding.groupBy ? pivotGroupBy(widget) : null;
+  const pivot = binding.groupBy.length > 0 ? pivotGroupBy(widget) : null;
 
-  const xIdx = data.columns.indexOf(binding.xColumn);
-  const xData = pivot ? pivot.xValues : data.rows.map((r) => r[xIdx]);
+  const xCol = binding.xColumns[0];
+  const xIdx = data.columns.indexOf(xCol);
+  const extraXIdxs = binding.xColumns.slice(1).map((c) => data.columns.indexOf(c));
+  const buildXLabel = (r: unknown[]) => {
+    const parts = [String(r[xIdx] ?? "")];
+    for (const idx of extraXIdxs) if (idx >= 0) parts.push(String(r[idx] ?? ""));
+    return parts.join(" / ");
+  };
+  const xData = pivot ? pivot.xValues : data.rows.map((r) => buildXLabel(r));
 
   const buildSeriesForCol = (col: string, yData: number[], i: number, seriesName?: string) => {
     const color = colors[i % colors.length];
@@ -136,6 +146,16 @@ export function buildEChartsOption(widget: DashboardWidget, colorScheme: ColorSc
     if (chartType === "bar") {
       base.barMaxWidth = 40;
       base.itemStyle = { color, borderRadius: [settings.barBorderRadius, settings.barBorderRadius, 0, 0] };
+      if (!pivot && binding.yColumns.length === 1) {
+        base.data = yData.map((v, j) => ({
+          value: v,
+          itemStyle: {
+            color: colors[j % colors.length],
+            borderRadius: [settings.barBorderRadius, settings.barBorderRadius, 0, 0],
+          },
+        }));
+        delete base.itemStyle;
+      }
     }
 
     if (chartType === "area" || chartType === "line") {
@@ -284,17 +304,17 @@ export function buildEChartsOption(widget: DashboardWidget, colorScheme: ColorSc
 
 function buildRadarOption(widget: DashboardWidget, colorScheme: ColorScheme) {
   const { data, binding, settings } = widget;
-  if (!data || !binding.xColumn || binding.yColumns.length === 0) return null;
+  if (!data || binding.xColumns.length === 0 || binding.yColumns.length === 0) return null;
 
   const colors = COLOR_PALETTES[settings.palette] ?? COLOR_PALETTES.default;
   const { textColor, bgColor, borderColor, tooltipText } = getChartThemeColors(colorScheme);
 
-  const xIdx = data.columns.indexOf(binding.xColumn);
+  const xIdx = data.columns.indexOf(binding.xColumns[0]);
   const xLabels = data.rows.map((r) => String(r[xIdx] ?? ""));
 
   const indicators = xLabels.map((name) => ({ name }));
 
-  const pivot = binding.groupBy ? pivotGroupBy(widget) : null;
+  const pivot = binding.groupBy.length > 0 ? pivotGroupBy(widget) : null;
 
   let seriesData: { name: string; value: number[] }[];
   if (pivot) {
@@ -337,13 +357,13 @@ function buildRadarOption(widget: DashboardWidget, colorScheme: ColorScheme) {
 
 function buildFunnelOption(widget: DashboardWidget, colorScheme: ColorScheme) {
   const { data, binding, settings } = widget;
-  if (!data || !binding.xColumn || binding.yColumns.length === 0) return null;
+  if (!data || binding.xColumns.length === 0 || binding.yColumns.length === 0) return null;
 
   const colors = COLOR_PALETTES[settings.palette] ?? COLOR_PALETTES.default;
   const { textColor, bgColor, borderColor, tooltipText } = getChartThemeColors(colorScheme);
   const yFmt = numberFormatter(settings.numberFormat);
 
-  const xIdx = data.columns.indexOf(binding.xColumn);
+  const xIdx = data.columns.indexOf(binding.xColumns[0]);
   const yIdx = data.columns.indexOf(binding.yColumns[0]);
 
   const funnelData = data.rows.map((r) => ({
@@ -378,15 +398,15 @@ function buildFunnelOption(widget: DashboardWidget, colorScheme: ColorScheme) {
 
 function buildTreemapOption(widget: DashboardWidget, colorScheme: ColorScheme) {
   const { data, binding, settings } = widget;
-  if (!data || !binding.xColumn || binding.yColumns.length === 0) return null;
+  if (!data || binding.xColumns.length === 0 || binding.yColumns.length === 0) return null;
 
   const colors = COLOR_PALETTES[settings.palette] ?? COLOR_PALETTES.default;
   const { textColor, bgColor, borderColor, tooltipText } = getChartThemeColors(colorScheme);
   const yFmt = numberFormatter(settings.numberFormat);
 
-  const xIdx = data.columns.indexOf(binding.xColumn);
+  const xIdx = data.columns.indexOf(binding.xColumns[0]);
   const yIdx = data.columns.indexOf(binding.yColumns[0]);
-  const gIdx = binding.groupBy ? data.columns.indexOf(binding.groupBy) : -1;
+  const gIdx = binding.groupBy.length > 0 ? data.columns.indexOf(binding.groupBy[0]) : -1;
 
   if (gIdx >= 0) {
     const groups = new Map<string, { name: string; value: number }[]>();
@@ -497,19 +517,24 @@ function buildGaugeOption(widget: DashboardWidget, colorScheme: ColorScheme) {
 
 /* ── SQL builder ─────────────────────────────────── */
 
-const ROW_NUM_COL = "__row_number__";
+const ROW_COUNT_COL = "__row_count__";
+export const DYNAMIC_DIM_COL = "__dynamic_dimension__";
+
+function isSpecialCol(col: string): boolean {
+  return col === ROW_COUNT_COL || col === DYNAMIC_DIM_COL;
+}
 
 function sqlCol(col: string): string {
-  if (col === ROW_NUM_COL) return "ROW_NUMBER() OVER() AS __row_number__";
+  if (col === ROW_COUNT_COL) return "COUNT(*) AS __row_count__";
   return col;
 }
 
 function sqlColRef(col: string): string {
-  if (col === ROW_NUM_COL) return "__row_number__";
+  if (col === ROW_COUNT_COL) return "__row_count__";
   return col;
 }
 
-function buildWhereClause(filters: FilterItem[], tableName: string): string {
+export function buildWhereClause(filters: FilterItem[], tableName: string): string {
   const clauses: string[] = [];
   for (const f of filters) {
     if (f.table !== tableName) continue;
@@ -537,6 +562,36 @@ function buildWhereClause(filters: FilterItem[], tableName: string): string {
       continue;
     }
 
+    if (f.filterType === "free_text") {
+      const vals = f.freeTextValues ?? [];
+      if (vals.length === 0) continue;
+      const caseSensitive = f.freeTextCaseSensitive ?? false;
+      const col = `\`${f.column}\``;
+      const colExpr = caseSensitive ? col : `UPPER(${col})`;
+      const parts: string[] = [];
+      const exactVals: string[] = [];
+      for (const v of vals) {
+        const normalized = caseSensitive ? v : v.toUpperCase();
+        const escaped = normalized.replace(/'/g, "''");
+        if (v.includes("*")) {
+          parts.push(`${colExpr} LIKE '${escaped.replace(/\*/g, "%")}'`);
+        } else {
+          exactVals.push(`'${escaped}'`);
+        }
+      }
+      if (exactVals.length === 1) {
+        parts.push(`${colExpr} = ${exactVals[0]}`);
+      } else if (exactVals.length > 1) {
+        parts.push(`${colExpr} IN (${exactVals.join(", ")})`);
+      }
+      if (parts.length === 1) {
+        clauses.push(parts[0]);
+      } else {
+        clauses.push(`(${parts.join(" OR ")})`);
+      }
+      continue;
+    }
+
     if (f.selectedValues.length === 0) continue;
     const col = `\`${f.column}\``;
     const escaped = f.selectedValues.map((v) => `'${v.replace(/'/g, "''")}'`);
@@ -551,50 +606,80 @@ function buildWhereClause(filters: FilterItem[], tableName: string): string {
 
 export function buildAutoSql(
   tableName: string | null,
-  xColumn: string | null,
+  xColumns: string[],
   yColumns: string[],
   settings?: ChartSettings,
   filters?: FilterItem[],
-  groupByColumn?: string | null,
+  groupByCols_input?: string[],
+  baseFilters?: BaseFilter[],
+  dynamicDimensionValue?: string,
 ): string {
-  if (!tableName || !xColumn || yColumns.length === 0) return "";
+  if (!tableName || xColumns.length === 0 || yColumns.length === 0) return "";
+
+  const resolveCol = (col: string): string => {
+    if (col === DYNAMIC_DIM_COL) return dynamicDimensionValue || "";
+    return col;
+  };
+
+  const resolvedX = xColumns.map(resolveCol).filter(Boolean);
+  const resolvedY = yColumns.map(resolveCol).filter(Boolean);
+  const resolvedGroup = (groupByCols_input ?? []).map(resolveCol).filter(Boolean);
+
+  if (resolvedX.length === 0 || resolvedY.length === 0) return "";
 
   const CHART_ROW_CAP = 10_000;
   const agg: Aggregation = settings?.aggregation ?? "SUM";
   const sort: SortOrder = settings?.sortOrder ?? "none";
 
-  const isRowNum = xColumn === ROW_NUM_COL;
-  const xSelect = sqlCol(xColumn);
-  const xRef = sqlColRef(xColumn);
+  const dimCols = [...resolvedX, ...resolvedGroup];
+  const hasRowCount = resolvedX.includes(ROW_COUNT_COL) || resolvedY.includes(ROW_COUNT_COL);
 
   const groupByCols: string[] = [];
-  if (!isRowNum) groupByCols.push(xRef);
+  const selectParts: string[] = [];
 
-  let selectCols = xSelect;
-  if (groupByColumn) {
-    selectCols += `, ${sqlCol(groupByColumn)}`;
-    groupByCols.push(sqlColRef(groupByColumn));
+  for (const col of dimCols) {
+    if (col === ROW_COUNT_COL) continue;
+    selectParts.push(col);
+    groupByCols.push(col);
   }
 
-  const aggCols =
-    agg === "NONE"
-      ? yColumns.map((c) => sqlCol(c)).join(", ")
-      : yColumns.map((c) => `${agg}(${c === ROW_NUM_COL ? "1" : c}) AS ${sqlColRef(c)}`).join(", ");
-
-  const parts = [`SELECT ${selectCols}, ${aggCols}`, `FROM ${tableName}`];
-
-  const where = filters ? buildWhereClause(filters, tableName) : "";
-  if (where) parts.push(where);
-
-  if (agg !== "NONE" && groupByCols.length > 0) {
-    parts.push(`GROUP BY ${groupByCols.join(", ")}`);
+  const aggParts: string[] = [];
+  for (const c of resolvedY) {
+    if (c === ROW_COUNT_COL) {
+      aggParts.push("COUNT(*) AS __row_count__");
+    } else if (agg === "NONE") {
+      aggParts.push(c);
+    } else {
+      aggParts.push(`${agg}(${c}) AS ${c}`);
+    }
   }
 
+  const allSelect = [...selectParts, ...aggParts].join(", ");
+  const quotedTable = quoteTableRef(tableName);
+  const parts = [`SELECT ${allSelect}`, `FROM ${quotedTable}`];
+
+  const userWhere = filters ? buildWhereClause(filters, tableName) : "";
+  const baseClauses = buildBaseFilterClauses(baseFilters);
+  const allWhereParts = [...baseClauses];
+  if (userWhere) allWhereParts.push(userWhere.replace(/^WHERE\s+/, ""));
+  if (allWhereParts.length > 0) parts.push(`WHERE ${allWhereParts.join(" AND ")}`);
+
+  if ((agg !== "NONE" || hasRowCount) && groupByCols.length > 0) {
+    parts.push("GROUP BY ALL");
+  }
+
+  const xRef = resolvedX[0] === ROW_COUNT_COL ? "__row_count__" : resolvedX[0];
   if (sort === "x-asc") parts.push(`ORDER BY ${xRef} ASC`);
   else if (sort === "x-desc") parts.push(`ORDER BY ${xRef} DESC`);
-  else if (sort === "y-asc" && yColumns.length > 0) parts.push(`ORDER BY ${sqlColRef(yColumns[0])} ASC`);
-  else if (sort === "y-desc" && yColumns.length > 0) parts.push(`ORDER BY ${sqlColRef(yColumns[0])} DESC`);
-  else if (!isRowNum) parts.push(`ORDER BY ${xRef}`);
+  else if (sort === "y-asc" && resolvedY.length > 0) {
+    const yRef = resolvedY[0] === ROW_COUNT_COL ? "__row_count__" : resolvedY[0];
+    parts.push(`ORDER BY ${yRef} ASC`);
+  } else if (sort === "y-desc" && resolvedY.length > 0) {
+    const yRef = resolvedY[0] === ROW_COUNT_COL ? "__row_count__" : resolvedY[0];
+    parts.push(`ORDER BY ${yRef} DESC`);
+  } else if (!hasRowCount) {
+    parts.push(`ORDER BY ${xRef}`);
+  }
 
   parts.push(`LIMIT ${CHART_ROW_CAP}`);
   return parts.join("\n");

@@ -132,10 +132,17 @@ export function generateAliases(
  * Resolve the display name for a column.
  * Priority: manual alias → auto-generated via pattern → title case fallback.
  */
+const SPECIAL_DISPLAY_NAMES: Record<string, string> = {
+  "__row_count__": "Row Count",
+  "__row_number__": "Row Count",
+  "__dynamic_dimension__": "Dynamic Dimension",
+};
+
 export function displayName(
   column: string,
   aliases?: Record<string, string>,
 ): string {
+  if (SPECIAL_DISPLAY_NAMES[column]) return SPECIAL_DISPLAY_NAMES[column];
   if (aliases?.[column]) return aliases[column];
   return patternAlias(column);
 }

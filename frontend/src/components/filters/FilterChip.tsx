@@ -1,19 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, ListFilter, Check, Search, X, Calendar } from "lucide-react";
+import { Loader2, ListFilter, Check, Search, X, Calendar, ArrowDownAZ, ArrowUpZA } from "lucide-react";
+import { SkeletonLine } from "@/components/ui/Skeleton";
 import { useStore } from "@/hooks/useStore";
 import { useColumnAlias } from "@/hooks/useColumnAlias";
+import { useCascadeRefresh } from "@/hooks/useCascadeRefresh";
 import { runQuery } from "@/lib/api";
+import { buildBaseFilterClauses, quoteTableRef } from "@/lib/sqlBuilder";
 import { usePopover } from "./usePopover";
 import FilterChipShell from "./FilterChipShell";
-import type { FilterItem } from "@/types/dashboard";
+import type { FilterItem, FilterSortOrder } from "@/types/dashboard";
 
 interface Props {
   filter: FilterItem;
 }
 
 export default function FilterChip({ filter }: Props) {
-  const { removeFilter, updateFilterMode, updateFilterType, setFilterValues, setFilterSelection } = useStore();
+  const { removeFilter, updateFilterMode, updateFilterType, setFilterValues, setFilterSelection, setFilterSortOrder } = useStore();
+  const triggerCascade = useCascadeRefresh();
   const alias = useColumnAlias();
   const columnLabel = alias(filter.column);
   const isDateColumn = /date|timestamp/i.test(filter.dataType);
@@ -31,14 +35,14 @@ export default function FilterChip({ filter }: Props) {
     setLoading(true);
     setError(null);
 
-    const parts = filter.table.split(".");
-    const quotedTable =
-      parts.length === 3
-        ? `\`${parts[0]}\`.\`${parts[1]}\`.\`${parts[2]}\``
-        : filter.table;
+    const effectiveTbl = useStore.getState().effectiveTableRef() ?? filter.table;
+    const quotedTable = quoteTableRef(effectiveTbl);
     const quotedCol = `\`${filter.column}\``;
 
-    const sql = `SELECT DISTINCT ${quotedCol} FROM ${quotedTable} WHERE ${quotedCol} IS NOT NULL ORDER BY ${quotedCol} LIMIT 500`;
+    const bf = useStore.getState().activeWorkspace?.datasource?.base_filters;
+    const bfParts = buildBaseFilterClauses(bf);
+    const bfWhere = bfParts.length > 0 ? ` AND ${bfParts.join(" AND ")}` : "";
+    const sql = `SELECT DISTINCT ${quotedCol} FROM ${quotedTable} WHERE ${quotedCol} IS NOT NULL${bfWhere} ORDER BY ${quotedCol} LIMIT 500`;
     runQuery(sql, 500)
       .then((result) => {
         const vals = result.rows.map((r) => String(r[0] ?? "")).filter(Boolean);
@@ -71,11 +75,29 @@ export default function FilterChip({ filter }: Props) {
   const handleDone = () => {
     setFilterSelection(filter.id, localSelection);
     setOpen(false);
+    triggerCascade(filter.column, localSelection);
   };
 
+  const currentSort: FilterSortOrder = filter.sortOrder ?? "asc";
+
+  const sortedValues = useMemo(() => {
+    const vals = [...filter.values];
+    if (currentSort === "desc") {
+      vals.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    } else if (currentSort === "asc") {
+      vals.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }
+    return vals;
+  }, [filter.values, currentSort]);
+
   const filtered = search
-    ? filter.values.filter((v) => v.toLowerCase().includes(search.toLowerCase()))
-    : filter.values;
+    ? sortedValues.filter((v) => v.toLowerCase().includes(search.toLowerCase()))
+    : sortedValues;
+
+  const cycleSortOrder = () => {
+    const next: FilterSortOrder = currentSort === "asc" ? "desc" : "asc";
+    setFilterSortOrder(filter.id, next);
+  };
 
   const selectionLabel =
     filter.selectedValues.length === 0
@@ -115,17 +137,32 @@ export default function FilterChip({ filter }: Props) {
               </span>
               <div className="flt-popover-mode">
                 <button
-                  className={`flt-popover-mode-btn${filter.mode === "single" ? " flt-popover-mode-btn--active" : ""}`}
-                  onClick={() => { updateFilterMode(filter.id, "single"); setLocalSelection((s) => s.slice(0, 1)); }}
+                  className="flt-popover-sort-btn"
+                  onClick={cycleSortOrder}
+                  title={`Sort: ${currentSort === "asc" ? "A → Z" : "Z → A"}`}
                 >
-                  Single
+                  {currentSort === "asc" ? <ArrowDownAZ size={14} /> : <ArrowUpZA size={14} />}
                 </button>
-                <button
-                  className={`flt-popover-mode-btn${filter.mode === "multi" ? " flt-popover-mode-btn--active" : ""}`}
-                  onClick={() => updateFilterMode(filter.id, "multi")}
-                >
-                  Multi
-                </button>
+                {filter.singleSelectForced ? (
+                  <span className="flt-popover-mode-locked" title="Admin restricted to single select">
+                    Single only
+                  </span>
+                ) : (
+                  <>
+                    <button
+                      className={`flt-popover-mode-btn${filter.mode === "single" ? " flt-popover-mode-btn--active" : ""}`}
+                      onClick={() => { updateFilterMode(filter.id, "single"); setLocalSelection((s) => s.slice(0, 1)); }}
+                    >
+                      Single
+                    </button>
+                    <button
+                      className={`flt-popover-mode-btn${filter.mode === "multi" ? " flt-popover-mode-btn--active" : ""}`}
+                      onClick={() => updateFilterMode(filter.id, "multi")}
+                    >
+                      Multi
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -183,7 +220,9 @@ export default function FilterChip({ filter }: Props) {
             {/* List */}
             {loading ? (
               <div className="flt-popover-loading">
-                <Loader2 size={16} className="spin" /> Loading values...
+                {Array.from({ length: 6 }, (_, i) => (
+                  <SkeletonLine key={i} width={`${50 + Math.random() * 40}%`} height={20} />
+                ))}
               </div>
             ) : error ? (
               <div className="flt-popover-error">

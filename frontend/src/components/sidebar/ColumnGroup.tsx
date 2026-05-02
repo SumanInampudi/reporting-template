@@ -9,6 +9,9 @@ interface Props {
   columns: ColumnMeta[];
   table: string;
   defaultOpen?: boolean;
+  isOpen?: boolean;
+  onToggle?: () => void;
+  indent?: boolean;
 }
 
 export default function ColumnGroup({
@@ -17,14 +20,19 @@ export default function ColumnGroup({
   columns,
   table,
   defaultOpen = true,
+  isOpen,
+  onToggle,
+  indent = false,
 }: Props) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [localOpen, setLocalOpen] = useState(defaultOpen);
+  const open = isOpen !== undefined ? isOpen : localOpen;
+  const handleToggle = onToggle ?? (() => setLocalOpen((v) => !v));
 
   if (columns.length === 0) return null;
 
   return (
-    <div className="col-group">
-      <button className="col-group-header" onClick={() => setOpen(!open)}>
+    <div className={`col-group${indent ? " col-group--indent" : ""}`}>
+      <button className="col-group-header" onClick={handleToggle}>
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         {icon === "dimension" ? (
           <Type size={13} className="col-group-icon dimension" />

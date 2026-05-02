@@ -4,33 +4,63 @@ import {
   type CollisionDetection,
 } from "@dnd-kit/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Database, BarChart3, Brain, ArrowLeft, Maximize2, Minimize2 } from "lucide-react";
+import { startWorkspaceTour, startDataTabTour, startDashboardTour } from "@/lib/tours";
+import { Database, BarChart3, Brain, ArrowLeft, Maximize2, Minimize2, PanelLeftOpen, PanelLeftClose, HelpCircle } from "lucide-react";
 import AppHeader from "@/components/AppHeader";
 import Sidebar from "@/components/Sidebar";
 import DataTab from "@/components/data/DataTab";
 import Canvas from "@/components/Canvas";
 import AiInsightsPanel from "@/components/ai/AiInsightsPanel";
-// PresetBar is now rendered inside Sidebar
+import ChatBubble from "@/components/ai/ChatBubble";
+import HelpDrawer from "@/components/ui/HelpDrawer";
+import PresetBar from "@/components/presets/PresetBar";
 import StatusBar from "@/components/ui/StatusBar";
 import UnsavedChangesDialog from "@/components/ui/UnsavedChangesDialog";
 import { useStore } from "@/hooks/useStore";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { updatePreset, fetchPresets } from "@/lib/api";
 import { buildPresetSql } from "@/lib/presetSqlHelper";
 import { isNumericType } from "@/lib/kpiUtils";
 import type { AppTab, Capability, ChartType } from "@/types/dashboard";
 
 const TAB_REGISTRY: Record<Capability, { tabKey: AppTab; label: string; icon: typeof Database; component: React.FC }> = {
-  self_service: { tabKey: "data", label: "Data & Filters", icon: Database, component: DataTab },
+  self_service: { tabKey: "data", label: "Data Explorer", icon: Database, component: DataTab },
   dashboarding: { tabKey: "dashboard", label: "Dashboard", icon: BarChart3, component: Canvas },
-  ai_insights: { tabKey: "ai_insights", label: "AI Insights", icon: Brain, component: AiInsightsPanel },
+  ai_insights: { tabKey: "ai_insights", label: "AI Assistant", icon: Brain, component: AiInsightsPanel },
 };
 
-const TAB_ORDER: Capability[] = ["self_service", "dashboarding", "ai_insights"];
+// To re-enable the AI Assistant tab, add "ai_insights" back to this array:
+const TAB_ORDER: Capability[] = ["self_service", "dashboarding"];
 
-const CUSTOM_PROPS = [
-  "--bg-app", "--bg-sidebar", "--bg-card", "--bg-input",
-  "--border", "--text-primary", "--text-secondary", "--text-muted", "--accent",
+const ALL_THEME_PROPS = [
+  "--bg-app", "--bg-sidebar", "--bg-card", "--bg-card-hover", "--bg-input",
+  "--border", "--border-focus",
+  "--text-primary", "--text-secondary", "--text-muted",
+  "--accent", "--accent-hover", "--accent-subtle",
+  "--danger", "--success", "--warning",
+  "--radius", "--shadow",
 ] as const;
+
+function FocusSidebar() {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <aside className={`focus-sidebar${expanded ? " focus-sidebar--open" : ""}`}>
+      <button
+        className="focus-sidebar-toggle"
+        onClick={() => setExpanded((v) => !v)}
+        title={expanded ? "Collapse panel" : "Expand panel"}
+      >
+        {expanded ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+      </button>
+      {expanded && (
+        <div className="focus-sidebar-content">
+          <Sidebar />
+        </div>
+      )}
+    </aside>
+  );
+}
 
 export default function WorkspaceApp() {
   const {
@@ -39,11 +69,16 @@ export default function WorkspaceApp() {
     activeWorkspace, closeWorkspace, themeConfig,
     isDirty, activePresetId, captureSnapshot, setLastSavedSnapshot, setPresets,
     focusMode, toggleFocusMode,
+    activateOptionalDim,
+    sidebarCollapsed,
   } = useStore();
+  useKeyboardShortcuts();
+
   const [activeDrag, setActiveDrag] = useState<{ type: string; payload: string } | null>(null);
   const [showUnsaved, setShowUnsaved] = useState(false);
   const [unsavedSaving, setUnsavedSaving] = useState(false);
-  const mainRef = useRef<HTMLDivElement>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Browser tab close guard
   useEffect(() => {
@@ -70,6 +105,19 @@ export default function WorkspaceApp() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [focusMode, toggleFocusMode]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => startWorkspaceTour(), 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (activeTab === "data") startDataTabTour();
+      else if (activeTab === "dashboard") startDashboardTour();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [activeTab]);
 
   const handleCloseWorkspace = useCallback(() => {
     if (isDirty()) {
@@ -120,17 +168,19 @@ export default function WorkspaceApp() {
   }, []);
 
   useEffect(() => {
-    const el = mainRef.current;
+    const el = rootRef.current;
     if (!el) return;
     el.setAttribute("data-theme", themeConfig.colorScheme);
     if (themeConfig.colorScheme === "custom" && themeConfig.customColors) {
       const cc = themeConfig.customColors;
-      CUSTOM_PROPS.forEach((p) => {
+      ALL_THEME_PROPS.forEach((p) => {
         const key = p.replace("--", "").replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-        el.style.setProperty(p, (cc as unknown as Record<string, string>)[key] ?? "");
+        const val = (cc as unknown as Record<string, string>)[key];
+        if (val) el.style.setProperty(p, val);
+        else el.style.removeProperty(p);
       });
     } else {
-      CUSTOM_PROPS.forEach((p) => el.style.removeProperty(p));
+      ALL_THEME_PROPS.forEach((p) => el.style.removeProperty(p));
     }
   }, [themeConfig]);
 
@@ -141,11 +191,13 @@ export default function WorkspaceApp() {
       .map((c) => ({ key: c, ...TAB_REGISTRY[c] }));
   }, [activeWorkspace]);
 
-  const activeEntry = enabledTabs.find((t) => t.tabKey === activeTab) ?? enabledTabs[0];
-  const ActiveComponent = activeEntry?.component ?? DataTab;
   const showSidebar = activeTab !== "ai_insights";
+  const { width: sidebarWidth, onMouseDown: onResizeStart } = useResizableSidebar();
 
-  // Presets feature check moved to Sidebar component
+  const showPresets = useMemo(() => {
+    const raw = activeWorkspace?.features ?? [];
+    return new Set(raw as string[]).has("presets");
+  }, [activeWorkspace]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const data = event.active.data.current;
@@ -167,20 +219,27 @@ export default function WorkspaceApp() {
 
     if (dragData.type === "column" && isKpiStrip) {
       const dataType = (dragData.dataType as string) ?? "";
+      const effectiveTbl = useStore.getState().effectiveTableRef() ?? (dragData.table as string) ?? "";
       addKpiCard(
         dragData.payload as string,
-        (dragData.table as string) ?? "",
+        effectiveTbl,
         isNumericType(dataType) ? "SUM" : "COUNT_DISTINCT",
       );
       return;
     }
 
     if (dragData.type === "column" && isFilterBar) {
+      const effectiveTbl = useStore.getState().effectiveTableRef() ?? (dragData.table as string) ?? "";
       addFilter(
         dragData.payload as string,
-        (dragData.table as string) ?? "",
+        effectiveTbl,
         (dragData.dataType as string) ?? "",
       );
+      return;
+    }
+
+    if (dragData.type === "dimension-source" && isFilterBar) {
+      activateOptionalDim(dragData.dimSourceId as string);
       return;
     }
 
@@ -208,10 +267,10 @@ export default function WorkspaceApp() {
       const binding = { ...widget.binding };
 
       if (!isNumericType(dataType)) {
-        if (!binding.xColumn) {
-          binding.xColumn = column;
-        } else if (column !== binding.xColumn) {
-          binding.groupBy = column;
+        if (binding.xColumns.length === 0) {
+          binding.xColumns = [column];
+        } else if (!binding.xColumns.includes(column) && !binding.groupBy.includes(column)) {
+          binding.groupBy = [...binding.groupBy, column];
         }
       } else if (!binding.yColumns.includes(column)) {
         binding.yColumns = [...binding.yColumns, column];
@@ -226,7 +285,7 @@ export default function WorkspaceApp() {
 
   return (
     <DndContext collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className={`app-root${focusMode ? " focus-mode" : ""}`}>
+      <div className={`app-root${focusMode ? " focus-mode" : ""}`} ref={rootRef}>
         {!focusMode && (
           <AppHeader>
             <button className="ws-back-btn" onClick={handleCloseWorkspace}>
@@ -235,11 +294,24 @@ export default function WorkspaceApp() {
             {activeWorkspace && (
               <span className="ws-active-name">{activeWorkspace.name}</span>
             )}
+            <button
+              className="ws-help-btn"
+              onClick={() => setShowHelp(true)}
+              title="How to use this workspace"
+            >
+              <HelpCircle size={15} />
+            </button>
           </AppHeader>
         )}
         <div className="app-layout">
-          {showSidebar && !focusMode && <Sidebar />}
-          <div className="app-main" ref={mainRef}>
+          {showSidebar && !focusMode && (
+            <div className="sidebar-resizable" style={sidebarCollapsed ? undefined : { width: sidebarWidth }}>
+              <Sidebar />
+              {!sidebarCollapsed && <div className="sidebar-resize-handle" onMouseDown={onResizeStart} />}
+            </div>
+          )}
+          {showSidebar && focusMode && <FocusSidebar />}
+          <div className="app-main">
             {!focusMode && (
               <div className="main-tabs">
                 {enabledTabs.map((tab) => {
@@ -264,7 +336,21 @@ export default function WorkspaceApp() {
               </div>
             )}
 
-            <ActiveComponent />
+            {showPresets && !focusMode && <PresetBar />}
+
+            {enabledTabs.map((tab) => {
+              const Comp = tab.component;
+              const isActive = activeTab === tab.tabKey;
+              return (
+                <div
+                  key={tab.key}
+                  className="app-tab-pane"
+                  style={isActive ? undefined : { display: "none" }}
+                >
+                  <Comp />
+                </div>
+              );
+            })}
           </div>
         </div>
         {!focusMode && <StatusBar />}
@@ -273,6 +359,20 @@ export default function WorkspaceApp() {
           <button className="focus-exit-btn" onClick={toggleFocusMode} title="Exit focus mode (Esc)">
             <Minimize2 size={16} /> Exit Focus
           </button>
+        )}
+
+        <ChatBubble />
+
+        {showHelp && (
+          <HelpDrawer
+            activeTab={activeTab}
+            onClose={() => setShowHelp(false)}
+            onTour={() => {
+              if (activeTab === "data") startDataTabTour(true);
+              else if (activeTab === "dashboard") startDashboardTour(true);
+              else startWorkspaceTour(true);
+            }}
+          />
         )}
       </div>
 

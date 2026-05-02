@@ -7,8 +7,12 @@ import { categorizeColumns } from "@/lib/columnUtils";
 import { CHART_OPTIONS } from "@/lib/constants";
 import type { ColumnMeta } from "@/types/dashboard";
 
-const SPECIAL_COLUMNS: ColumnMeta[] = [
-  { col_name: "__row_number__", data_type: "INT" },
+const SPECIAL_MEASURES: ColumnMeta[] = [
+  { col_name: "__row_count__", data_type: "INT" },
+];
+
+const DYNAMIC_DIM: ColumnMeta[] = [
+  { col_name: "__dynamic_dimension__", data_type: "STRING" },
 ];
 
 export default function DesignTab() {
@@ -17,10 +21,12 @@ export default function DesignTab() {
     selectedOutputColumns, baseDataset,
   } = useStore();
 
-  const colKey =
-    selectedCatalog && selectedSchema && selectedTable
+  const isCustomQuery = useStore((s) => s.activeWorkspace?.datasource?.source_mode === "query");
+  const colKey = isCustomQuery
+    ? (selectedTable ? "__custom_source__" : null)
+    : (selectedCatalog && selectedSchema && selectedTable
       ? `${selectedCatalog}.${selectedSchema}.${selectedTable}`
-      : null;
+      : null);
   const allColumns = colKey ? columns[colKey] ?? [] : [];
 
   const visibleColumns = useMemo(() => {
@@ -70,12 +76,20 @@ export default function DesignTab() {
           />
 
           {hasDataset && (
-            <ColumnGroup
-              title="Special / Row Metrics"
-              icon="fact"
-              columns={SPECIAL_COLUMNS}
-              table={colKey!}
-            />
+            <>
+              <ColumnGroup
+                title="Special Measures"
+                icon="fact"
+                columns={SPECIAL_MEASURES}
+                table={colKey!}
+              />
+              <ColumnGroup
+                title="Dynamic Fields"
+                icon="dimension"
+                columns={DYNAMIC_DIM}
+                table={colKey!}
+              />
+            </>
           )}
         </div>
       )}
@@ -84,7 +98,7 @@ export default function DesignTab() {
         <div className="sidebar-section">
           <p className="sidebar-info">
             {allColumns.length > 0
-              ? "No output columns selected. Go to the Data & Filters tab to choose columns."
+              ? "No output columns selected. Go to the Data Explorer tab to choose columns."
               : "Select a table in the Data Source tab first."}
           </p>
         </div>

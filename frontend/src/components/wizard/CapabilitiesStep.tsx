@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, Upload } from "lucide-react";
 import {
   CAPABILITIES, SELF_SERVICE_FEATURES, DASHBOARDING_FEATURES, AI_OPTIONS,
 } from "@/lib/wizardConfig";
@@ -19,6 +19,9 @@ interface Props {
 
   aiEndpoints: Record<AiInsightsOption, string>;
   setAiEndpoint: (opt: AiInsightsOption, value: string) => void;
+
+  uploadLimitMb: number;
+  onUploadLimitChange: (mb: number) => void;
 }
 
 export default function CapabilitiesStep({
@@ -27,6 +30,7 @@ export default function CapabilitiesStep({
   selectedDashFeatures, toggleDashFeature,
   selectedAiOptions, toggleAiOption,
   aiEndpoints, setAiEndpoint,
+  uploadLimitMb, onUploadLimitChange,
 }: Props) {
   return (
     <div className="wizard-section">
@@ -67,22 +71,44 @@ export default function CapabilitiesStep({
                     const locked = !selected || feat.disabled;
                     const on = !locked && selectedFeatures.has(feat.id);
                     return (
-                      <div
-                        key={feat.id}
-                        className={`wizard-cap-feature ${locked ? "wizard-cap-feature--disabled" : ""}`}
-                      >
-                        <span className="wizard-cap-feature-label">
-                          {feat.label}
-                          {feat.disabled && <span className="wizard-coming-soon-badge">Coming Soon</span>}
-                        </span>
+                      <div key={feat.id}>
                         <div
-                          className={`toggle-switch ${on ? "toggle-switch--on" : ""} ${locked ? "toggle-switch--disabled" : ""}`}
-                          onClick={() => !locked && toggleFeature(feat.id)}
-                          role="switch"
-                          aria-checked={on}
+                          className={`wizard-cap-feature ${locked ? "wizard-cap-feature--disabled" : ""}`}
                         >
-                          <div className="toggle-switch-knob" />
+                          <span className="wizard-cap-feature-label">
+                            {feat.id === "upload_data" && <Upload size={12} />}
+                            {feat.label}
+                            {feat.disabled && <span className="wizard-coming-soon-badge">Coming Soon</span>}
+                          </span>
+                          <div
+                            className={`toggle-switch ${on ? "toggle-switch--on" : ""} ${locked ? "toggle-switch--disabled" : ""}`}
+                            onClick={() => !locked && toggleFeature(feat.id)}
+                            role="switch"
+                            aria-checked={on}
+                          >
+                            <div className="toggle-switch-knob" />
+                          </div>
                         </div>
+                        {feat.id === "upload_data" && on && (
+                          <div className="wizard-upload-limit">
+                            <label className="wizard-upload-limit-label">
+                              Max file size: <strong>{uploadLimitMb} MB</strong>
+                            </label>
+                            <input
+                              type="range"
+                              className="wizard-upload-limit-slider"
+                              min={1}
+                              max={5}
+                              step={0.5}
+                              value={uploadLimitMb}
+                              onChange={(e) => onUploadLimitChange(Number(e.target.value))}
+                            />
+                            <div className="wizard-upload-limit-range">
+                              <span>1 MB</span>
+                              <span>5 MB</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

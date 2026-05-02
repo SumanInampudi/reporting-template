@@ -63,8 +63,11 @@ export default function ColumnOrderPanel({ embedded = false }: { embedded?: bool
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
 
-  const colKey = selectedCatalog && selectedSchema && selectedTable
-    ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null;
+  const isCustomQuery = useStore((s) => s.activeWorkspace?.datasource?.source_mode === "query");
+  const colKey = isCustomQuery
+    ? (selectedTable ? "__custom_source__" : null)
+    : (selectedCatalog && selectedSchema && selectedTable
+      ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null);
   const colMap = new Map<string, ColumnMeta>();
   if (colKey) {
     for (const c of columns[colKey] ?? []) colMap.set(c.col_name, c);

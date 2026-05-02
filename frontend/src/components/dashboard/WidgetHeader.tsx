@@ -46,10 +46,10 @@ export default function WidgetHeader({
         onChange={(e) => onTitleChange(e.target.value)}
       />
 
-      {widget.binding.groupBy && (
-        <span className="groupby-badge" title={`Color by: ${widget.binding.groupBy}`}>
+      {widget.binding.groupBy.length > 0 && (
+        <span className="groupby-badge" title={`Color by: ${widget.binding.groupBy.join(", ")}`}>
           <Palette size={10} />
-          {alias(widget.binding.groupBy)}
+          {widget.binding.groupBy.map(alias).join(", ")}
           {onClearGroupBy && (
             <button className="groupby-badge-x" onClick={onClearGroupBy} title="Remove color-by">
               <X size={8} />

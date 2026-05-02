@@ -9,7 +9,7 @@ import { useStore } from "@/hooks/useStore";
 import { useDraggableModal } from "@/hooks/useDraggableModal";
 import {
   fetchPresets, deletePreset as apiDeletePreset, duplicatePreset as apiDuplicate,
-  updatePreset as apiUpdate,
+  updatePreset as apiUpdate, setAdminDefaultPreset as apiSetAdminDefault,
   fetchSubscriptions, batchSaveSubscriptions,
 } from "@/lib/api";
 import type { Preset, Subscription } from "@/types/dashboard";
@@ -34,20 +34,39 @@ export default function PresetListPanel({ onClose, onLoad }: Props) {
 
   const wsId = activeWorkspace?.id;
   const myEmail = (currentUser?.email || currentUser?.username || "").toLowerCase();
+  const isAdmin = !currentUser || currentUser.role === "admin";
   const subsEnabled = (activeWorkspace?.features ?? []).includes("subscriptions");
 
+  const adminDefaultId = activeWorkspace?.default_preset_id ?? null;
+
   const defaultKey = wsId ? `default-preset-${wsId}` : null;
-  const [defaultPresetId, setDefaultPresetId] = useState<string | null>(() =>
+  const [myDefaultId, setMyDefaultId] = useState<string | null>(() =>
     defaultKey ? localStorage.getItem(defaultKey) : null,
   );
-  const handleToggleDefault = (preset: Preset) => {
+
+  const handleToggleMyDefault = (preset: Preset) => {
     if (!defaultKey) return;
-    if (defaultPresetId === preset.id) {
+    if (myDefaultId === preset.id) {
       localStorage.removeItem(defaultKey);
-      setDefaultPresetId(null);
+      setMyDefaultId(null);
     } else {
       localStorage.setItem(defaultKey, preset.id);
-      setDefaultPresetId(preset.id);
+      setMyDefaultId(preset.id);
+    }
+  };
+
+  const handleToggleAdminDefault = async (preset: Preset) => {
+    if (!wsId || busy) return;
+    setBusy(true);
+    try {
+      const newId = adminDefaultId === preset.id ? null : preset.id;
+      const updated = await apiSetAdminDefault(wsId, newId);
+      useStore.setState({ activeWorkspace: updated });
+      flash(newId ? `"${preset.name}" set as workspace default` : "Workspace default removed");
+    } catch {
+      flash("Failed to set workspace default");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -218,7 +237,9 @@ export default function PresetListPanel({ onClose, onLoad }: Props) {
                     key={p.id}
                     preset={p}
                     isActive={p.id === activePresetId}
-                    isDefault={p.id === defaultPresetId}
+                    isAdminDefault={p.id === adminDefaultId}
+                    isMyDefault={p.id === myDefaultId}
+                    isAdmin={isAdmin}
                     disabled={busy}
                     showSubscribe={subsEnabled}
                     subscriberCount={(allSubs[p.id] ?? []).length}
@@ -229,7 +250,8 @@ export default function PresetListPanel({ onClose, onLoad }: Props) {
                     onTogglePublic={handleTogglePublic}
                     onRename={setRenameTarget}
                     onSubscribe={setSubscribeTarget}
-                    onToggleDefault={handleToggleDefault}
+                    onToggleDefault={handleToggleMyDefault}
+                    onToggleAdminDefault={handleToggleAdminDefault}
                   />
                 ))}
               </div>
@@ -245,7 +267,9 @@ export default function PresetListPanel({ onClose, onLoad }: Props) {
                     key={p.id}
                     preset={p}
                     isActive={p.id === activePresetId}
-                    isDefault={p.id === defaultPresetId}
+                    isAdminDefault={p.id === adminDefaultId}
+                    isMyDefault={p.id === myDefaultId}
+                    isAdmin={isAdmin}
                     disabled={busy}
                     showSubscribe={subsEnabled}
                     subscriberCount={(allSubs[p.id] ?? []).length}
@@ -256,7 +280,8 @@ export default function PresetListPanel({ onClose, onLoad }: Props) {
                     onTogglePublic={handleTogglePublic}
                     onRename={setRenameTarget}
                     onSubscribe={setSubscribeTarget}
-                    onToggleDefault={handleToggleDefault}
+                    onToggleDefault={handleToggleMyDefault}
+                    onToggleAdminDefault={handleToggleAdminDefault}
                   />
                 ))}
               </div>

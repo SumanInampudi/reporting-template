@@ -127,13 +127,6 @@ class SettingsConfig(BaseModel):
     query_timeout_seconds: int = 300
 
 
-class FeaturesConfig(BaseModel):
-    enable_charts: bool = True
-    enable_presets: bool = True
-    enable_sql_preview: bool = True
-    enable_csv_export: bool = True
-
-
 class CacheConfig(BaseModel):
     enabled: bool = True
     ttl_seconds: int = 300
@@ -145,7 +138,6 @@ class AppConfig(BaseModel):
     secrets: SecretsConfig = SecretsConfig()
     server: ServerConfig = ServerConfig()
     settings: SettingsConfig = SettingsConfig()
-    features: FeaturesConfig = FeaturesConfig()
     cache: CacheConfig = CacheConfig()
 
     @property

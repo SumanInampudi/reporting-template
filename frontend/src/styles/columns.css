@@ -1,0 +1,80 @@
+/* ── Column Groups ─────────────────────────────── */
+
+.col-group { margin-bottom: var(--space-4); }
+
+.col-group-header {
+  display: flex; align-items: center; gap: var(--space-3); width: 100%;
+  padding: var(--space-3) var(--space-3); border: none; background: none;
+  border-radius: var(--radius-sm); cursor: pointer;
+  font-size: var(--font-xs); font-weight: 600; color: var(--text-secondary);
+  transition: background 0.1s;
+}
+.col-group-header:hover { background: var(--bg-card-hover); }
+
+.col-group-icon.dimension { color: var(--warning); }
+.col-group-icon.fact { color: var(--accent); }
+
+.col-group-title { flex: 1; text-align: left; }
+
+.col-group-count {
+  font-size: var(--font-2xs); font-weight: 700;
+  background: var(--bg-card-hover); border-radius: 10px;
+  padding: var(--space-1) var(--space-3); color: var(--text-muted);
+}
+
+.col-group-list { padding-left: var(--space-2); }
+
+/* Two-level hierarchy */
+.col-group--level1 { margin-bottom: var(--space-2); }
+.col-group-header--level1 {
+  font-size: var(--font-sm); font-weight: 700;
+  color: var(--text-primary);
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.col-group--indent { padding-left: var(--space-6); }
+.col-group--indent .col-group-header {
+  font-size: var(--font-2xs); font-weight: 500;
+}
+
+/* ── Columns ──────────────────────────────────── */
+
+.column-list-flat { display: flex; flex-direction: column; gap: var(--space-1); }
+
+.sidebar-column {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm);
+  cursor: grab; font-size: var(--font-sm); color: var(--text-secondary);
+  transition: background 0.15s;
+}
+.sidebar-column:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.sidebar-column.dragging { opacity: 0.4; }
+
+.col-type-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.375rem; height: 1.375rem; border-radius: 4px;
+  font-size: var(--font-2xs); font-weight: 700; flex-shrink: 0;
+}
+.col-type-badge.numeric { background: var(--accent-subtle); color: var(--accent); }
+.col-type-badge.text { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+
+.col-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.col-dtype { font-size: var(--font-2xs); color: var(--text-muted); flex-shrink: 0; }
+
+/* ── Chart type chips ──────────────────────────── */
+
+.chart-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+
+.sidebar-chip {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5); border: 1px dashed var(--border);
+  border-radius: var(--radius); background: none;
+  color: var(--text-secondary); font-size: var(--font-sm);
+  cursor: grab; transition: all 0.15s;
+}
+.sidebar-chip:hover {
+  border-color: var(--accent); color: var(--text-primary);
+  background: var(--accent-subtle);
+}
+.sidebar-chip.dragging { opacity: 0.4; }
+

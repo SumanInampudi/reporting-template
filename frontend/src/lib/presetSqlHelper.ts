@@ -7,13 +7,9 @@ import { buildLoadSql } from "./sqlBuilder";
  */
 export function buildPresetSql(): string | null {
   const s = useStore.getState();
-  const { selectedCatalog, selectedSchema, selectedTable, selectedOutputColumns, formulaColumns, sharedFormulas, filters, dynamicFilters } = s;
+  const { selectedOutputColumns, formulaColumns, sharedFormulas, filters, dynamicFilters } = s;
 
-  const fqTable =
-    selectedCatalog && selectedSchema && selectedTable
-      ? `${selectedCatalog}.${selectedSchema}.${selectedTable}`
-      : null;
-
+  const fqTable = s.effectiveTableRef();
   if (!fqTable || selectedOutputColumns.length === 0) return null;
 
   const sfAsFc = sharedFormulas.map((sf) => ({
@@ -21,6 +17,7 @@ export function buildPresetSql(): string | null {
   }));
   const allFc = [...formulaColumns, ...sfAsFc];
   const limit = s.effectiveRowLimit();
-  const aggs = s.activeWorkspace?.column_aggregations;
-  return buildLoadSql(fqTable, selectedOutputColumns, allFc, filters, dynamicFilters, limit, aggs);
+  const aggs = s.resolvedAggregations();
+  const bf = s.activeWorkspace?.datasource?.base_filters;
+  return buildLoadSql(fqTable, selectedOutputColumns, allFc, filters, dynamicFilters, limit, aggs, undefined, bf);
 }

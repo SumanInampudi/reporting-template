@@ -1,4 +1,6 @@
-import type { Aggregation, KpiFormat } from "@/types/dashboard";
+import type { Aggregation, BaseFilter, FilterItem, KpiFormat } from "@/types/dashboard";
+import { buildBaseFilterClauses, quoteTableRef } from "./sqlBuilder";
+import { buildWhereClause } from "./chartBuilder";
 
 export const AGG_OPTIONS: { id: Aggregation; label: string }[] = [
   { id: "SUM", label: "SUM" },
@@ -39,15 +41,21 @@ export function formatKpiValue(
   return `${prefix ?? ""}${out}${suffix ?? ""}`;
 }
 
-export function buildKpiSql(table: string, column: string, aggregation: Aggregation): string {
-  const parts = table.split(".");
-  const qt = parts.length === 3
-    ? `\`${parts[0]}\`.\`${parts[1]}\`.\`${parts[2]}\``
-    : table;
-  const aggExpr = aggregation === "COUNT_DISTINCT"
-    ? `COUNT(DISTINCT \`${column}\`)`
-    : `${aggregation}(\`${column}\`)`;
-  return `SELECT ${aggExpr} AS val FROM ${qt}`;
+export function buildKpiSql(table: string, column: string, aggregation: Aggregation, baseFilters?: BaseFilter[], filters?: FilterItem[]): string {
+  const qt = quoteTableRef(table);
+  const isRowCount = column === "__row_count__" || column === "__row_number__";
+  const aggExpr = isRowCount
+    ? "COUNT(*)"
+    : aggregation === "COUNT_DISTINCT"
+      ? `COUNT(DISTINCT \`${column}\`)`
+      : `${aggregation}(\`${column}\`)`;
+  const allWhereParts: string[] = [...buildBaseFilterClauses(baseFilters)];
+  if (filters && filters.length > 0) {
+    const userWhere = buildWhereClause(filters, table);
+    if (userWhere) allWhereParts.push(userWhere.replace(/^WHERE\s+/, ""));
+  }
+  const where = allWhereParts.length > 0 ? ` WHERE ${allWhereParts.join(" AND ")}` : "";
+  return `SELECT ${aggExpr} AS val FROM ${qt}${where}`;
 }
 
 export function aggLabel(agg: Aggregation): string {

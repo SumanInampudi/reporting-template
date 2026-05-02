@@ -22,23 +22,36 @@ from .config import AppConfig, load_config
 from .db import (
     _log_sp_config,
     describe_table, describe_table_in, get_connection, list_catalogs, list_schemas,
-    list_secret_scopes, list_tables, list_tables_in, run_query, set_user_token,
+    list_tables, list_tables_in, run_query, set_user_token,
 )
 from .mock_data import MOCK_COLUMNS, MOCK_TABLES
 from .rbac import resolve_role
 from .routes.abbreviations import router as abbreviations_router
+from .routes.app_settings import router as app_settings_router
+from .routes.genie import router as genie_router
 from .routes.presets import router as presets_router
 from .routes.shared_formulas import router as shared_formulas_router
 from .routes.subscriptions import router as subscriptions_router
 from .routes.themes import router as themes_router
 from .routes.workspaces import router as workspaces_router
-from .storage import ensure_tables
+from .storage import ensure_tables, get_app_settings
 
 
 def _env(key: str, default: str = "") -> str:
     """Read env var, treating 'none' (case-insensitive) as empty string."""
     val = _os.environ.get(key, default).strip()
     return "" if val.lower() == "none" else val
+
+
+def _safe_detail(exc: Exception) -> str:
+    """Return a user-safe error message without exposing internals."""
+    msg = str(exc)
+    if len(msg) > 200:
+        msg = msg[:200] + "..."
+    for sensitive in ("Traceback", "/Users/", "/home/", "password", "token", "secret"):
+        if sensitive.lower() in msg.lower():
+            return "An internal error occurred. Check server logs for details."
+    return msg
 
 
 cfg: AppConfig = load_config()
@@ -73,14 +86,26 @@ app.include_router(subscriptions_router)
 app.include_router(shared_formulas_router)
 app.include_router(themes_router)
 app.include_router(abbreviations_router)
+app.include_router(app_settings_router)
+app.include_router(genie_router)
 
 
 # ── YAML → Delta migration (one-time) ─────────────────────────────────
 
 @app.post("/api/admin/migrate-yaml-to-delta")
-def migrate_yaml_to_delta() -> dict[str, Any]:
+def migrate_yaml_to_delta(request: Request) -> dict[str, Any]:
     """Migrate data from YAML files into Delta tables. Safe to run multiple
     times — it overwrites existing Delta data with the YAML content."""
+    email = (
+        request.headers.get("x-forwarded-email")
+        or request.headers.get("x-forwarded-preferred-username")
+        or request.headers.get("x-forwarded-user")
+        or _os.environ.get("BI_USER_EMAIL", "")
+    )
+    if not cfg.is_mock_mode:
+        role, _ = resolve_role(email)
+        if role != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
     from .storage_yaml import (
         load_workspaces as yaml_ws,
         load_presets as yaml_ps,
@@ -214,7 +239,7 @@ def get_catalogs() -> list[str]:
         return _filter_catalogs(result)
     except Exception as exc:
         logger.exception("Failed to list catalogs")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
 
 @app.get("/api/catalogs/{catalog}/schemas")
@@ -231,7 +256,7 @@ def get_schemas(catalog: str) -> list[str]:
         return result
     except Exception as exc:
         logger.exception("Failed to list schemas in %s", catalog)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
 
 @app.get("/api/catalogs/{catalog}/schemas/{schema}/tables")
@@ -248,13 +273,13 @@ def get_tables_in(catalog: str, schema: str) -> list[dict[str, Any]]:
         return result
     except Exception as exc:
         logger.exception("Failed to list tables in %s.%s", catalog, schema)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
 
 @app.get("/api/catalogs/{catalog}/schemas/{schema}/tables/{table_name}/columns")
-def get_columns_in(catalog: str, schema: str, table_name: str) -> list[dict[str, Any]]:
+def get_columns_in(catalog: str, schema: str, table_name: str) -> dict[str, Any]:
     if cfg.is_mock_mode:
-        return MOCK_COLUMNS.get(table_name, [])
+        return {"columns": MOCK_COLUMNS.get(table_name, []), "partition_columns": []}
     key = _cache_key("columns_in", catalog, schema, table_name)
     if cfg.cache.enabled and key in _cache:
         return _cache[key]
@@ -265,7 +290,7 @@ def get_columns_in(catalog: str, schema: str, table_name: str) -> list[dict[str,
         return result
     except Exception as exc:
         logger.exception("Failed to describe %s.%s.%s", catalog, schema, table_name)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
 
 @app.get("/api/tables")
@@ -282,13 +307,13 @@ def get_tables() -> list[dict[str, Any]]:
         return result
     except Exception as exc:
         logger.exception("Failed to list tables")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
 
 @app.get("/api/tables/{table_name}/columns")
-def get_columns(table_name: str) -> list[dict[str, Any]]:
+def get_columns(table_name: str) -> dict[str, Any]:
     if cfg.is_mock_mode:
-        return MOCK_COLUMNS.get(table_name, [])
+        return {"columns": MOCK_COLUMNS.get(table_name, []), "partition_columns": []}
     key = _cache_key("columns", table_name)
     if cfg.cache.enabled and key in _cache:
         return _cache[key]
@@ -299,7 +324,7 @@ def get_columns(table_name: str) -> list[dict[str, Any]]:
         return result
     except Exception as exc:
         logger.exception("Failed to describe table %s", table_name)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
 
 # ── Query ─────────────────────────────────────────────────────────────
@@ -326,7 +351,7 @@ def execute_query(req: QueryRequest) -> dict[str, Any]:
         return result
     except Exception as exc:
         logger.exception("Query execution failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
 
 # ── CSV Export (streaming) ────────────────────────────────────────────
@@ -353,7 +378,7 @@ def export_csv(req: ExportRequest) -> StreamingResponse:
             cursor.close()
     except Exception as exc:
         logger.exception("CSV export query failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
 
     logger.info("CSV export: %d rows x %d cols", len(rows), len(columns))
 
@@ -383,11 +408,68 @@ def export_csv(req: ExportRequest) -> StreamingResponse:
     )
 
 
+@app.post("/api/export-excel")
+def export_excel(req: ExportRequest) -> StreamingResponse:
+    """Execute query and return results as an Excel (.xlsx) download."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+
+    safe_sql = req.sql.rstrip(";")
+
+    try:
+        with get_connection(cfg) as conn:
+            cursor = conn.cursor()
+            cursor.execute(safe_sql)
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            cursor.close()
+    except Exception as exc:
+        logger.exception("Excel export query failed")
+        raise HTTPException(status_code=500, detail=_safe_detail(exc)) from exc
+
+    logger.info("Excel export: %d rows x %d cols", len(rows), len(columns))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Export"
+
+    for ci, col_name in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=ci, value=col_name)
+        cell.font = cell.font.copy(bold=True)
+
+    for ri, row in enumerate(rows, 2):
+        for ci, val in enumerate(row, 1):
+            ws.cell(row=ri, column=ci, value=val)
+
+    for ci in range(1, len(columns) + 1):
+        ws.column_dimensions[get_column_letter(ci)].width = 18
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = req.filename if req.filename.endswith(".xlsx") else f"{req.filename}.xlsx"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ── Config info (non-sensitive) ───────────────────────────────────────
 
 @app.get("/api/config")
 def get_config_info() -> dict:
-    from .db import _DEFAULT_SECRET_SCOPE, _DEFAULT_SECRET_KEY
+    app_s = get_app_settings() or {}
+    team_name = app_s.get("team_name") or _env("TEAM_NAME", "BI Excellence Suite")
+    platform_tagline = app_s.get("platform_tagline") or ""
+
+    query_timeout = app_s.get("query_timeout_seconds")
+    if query_timeout is None or query_timeout == "":
+        query_timeout = cfg.settings.query_timeout_seconds
+    else:
+        query_timeout = int(query_timeout)
 
     return {
         "type": cfg.datasource.type,
@@ -395,30 +477,15 @@ def get_config_info() -> dict:
         "catalog": cfg.datasource.catalog,
         "schema": cfg.datasource.schema_name,
         "local_test_mode": cfg.is_mock_mode,
-        "features": cfg.features.model_dump(),
+        "team_name": team_name,
+        "platform_tagline": platform_tagline,
+        "onboarded": bool(app_s.get("team_name")),
         "limits": {
             "default_row_limit": cfg.settings.default_row_limit,
             "max_row_limit": cfg.settings.max_row_limit,
-            "query_timeout_seconds": cfg.settings.query_timeout_seconds,
-        },
-        "security": {
-            "default_secret_scope": _DEFAULT_SECRET_SCOPE,
-            "default_secret_key": _DEFAULT_SECRET_KEY,
+            "query_timeout_seconds": query_timeout,
         },
     }
-
-
-# ── Secret Scopes ─────────────────────────────────────────────────────
-
-@app.get("/api/secret-scopes")
-def get_secret_scopes() -> list[str]:
-    if cfg.is_mock_mode:
-        return ["mock-scope-dev", "mock-scope-prod"]
-    try:
-        return list_secret_scopes()
-    except Exception as exc:
-        logger.exception("Failed to list secret scopes")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ── Test Connection ───────────────────────────────────────────────────
@@ -436,7 +503,7 @@ def test_connection() -> dict[str, Any]:
         return {"ok": True, "message": "Connected successfully"}
     except Exception as exc:
         logger.exception("Connection test failed")
-        return {"ok": False, "message": str(exc)}
+        return {"ok": False, "message": _safe_detail(exc)}
 
 
 # ── Static SPA serving (production) ──────────────────────────────────

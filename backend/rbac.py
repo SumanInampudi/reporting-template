@@ -4,7 +4,7 @@ ADMIN_ROLE_SUFFIXES: comma-separated list of group name suffixes that
 grant "admin" role.  If empty, everyone is admin (no restriction).
 Example: "DataAdmin,ClusterAdmin"
 
-To customise for your team, change this env var in .env / databricks.yml.
+Resolved from: app_settings DB -> ADMIN_ROLE_SUFFIXES env var -> everyone is admin.
 """
 from __future__ import annotations
 
@@ -21,11 +21,30 @@ def _env(key: str, default: str = "") -> str:
     return "" if val.lower() == "none" else val
 
 
-ADMIN_ROLE_SUFFIXES: list[str] = [
-    s.strip()
-    for s in _env("ADMIN_ROLE_SUFFIXES").split(",")
-    if s.strip()
-]
+def _resolve_admin_suffixes() -> list[str]:
+    """Read admin role suffixes from app_settings (DB), fall back to env var."""
+    try:
+        from .storage import get_app_settings
+        app_s = get_app_settings() or {}
+        db_val = (app_s.get("admin_role_suffixes") or "").strip()
+        if db_val and db_val.lower() != "none":
+            return [s.strip() for s in db_val.split(",") if s.strip()]
+    except Exception:
+        pass
+    raw = _env("ADMIN_ROLE_SUFFIXES")
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+
+_suffixes_cache: TTLCache = TTLCache(maxsize=1, ttl=60)
+
+
+def get_admin_suffixes() -> list[str]:
+    cached = _suffixes_cache.get("suffixes")
+    if cached is not None:
+        return cached
+    result = _resolve_admin_suffixes()
+    _suffixes_cache["suffixes"] = result
+    return result
 
 _groups_cache: TTLCache = TTLCache(maxsize=512, ttl=300)
 
@@ -35,7 +54,8 @@ def resolve_role(email: str) -> tuple[str, list[str]]:
 
     Returns (role, groups).  Results are cached for 5 minutes.
     """
-    if not ADMIN_ROLE_SUFFIXES:
+    suffixes = get_admin_suffixes()
+    if not suffixes:
         return "admin", []
 
     cache_key = f"groups:{email}"
@@ -48,7 +68,8 @@ def resolve_role(email: str) -> tuple[str, list[str]]:
         from databricks.sdk import WorkspaceClient
 
         client = WorkspaceClient()
-        users = client.users.list(filter=f'userName eq "{email}"')
+        safe_email = email.replace('"', '').replace("'", "")
+        users = client.users.list(filter=f'userName eq "{safe_email}"')
         user = next(users, None)
         if user and user.groups:
             groups = [g.display for g in user.groups if g.display]
@@ -57,7 +78,7 @@ def resolve_role(email: str) -> tuple[str, list[str]]:
 
     role = "consumer"
     for group_name in groups:
-        if any(group_name.endswith(f".{suffix}") for suffix in ADMIN_ROLE_SUFFIXES):
+        if any(group_name.endswith(f".{suffix}") for suffix in suffixes):
             role = "admin"
             break
 

@@ -1,0 +1,83 @@
+/* ── App Header ────────────────────────────────── */
+
+.app-header {
+  display: flex; align-items: center; justify-content: space-between;
+  height: var(--header-h); min-height: var(--header-h); padding: 0 var(--space-8);
+  background: var(--bg-sidebar); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.app-header-left { display: flex; align-items: center; gap: var(--space-6); }
+
+.app-header-logo { height: 28px; width: auto; object-fit: contain; filter: brightness(0) invert(1); }
+[data-theme="light"] .app-header-logo,
+[data-theme="nike-light"] .app-header-logo,
+[data-theme="slate"] .app-header-logo,
+[data-theme="minimal"] .app-header-logo { filter: none; }
+
+.app-header-title { display: flex; flex-direction: column; line-height: 1.2; }
+.app-header-brand { font-size: var(--font-lg); font-weight: 900; color: var(--text-primary); letter-spacing: -0.01em; text-transform: uppercase; }
+.app-header-subtitle { font-size: var(--font-2xs); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.12em; }
+
+.app-header-right { display: flex; align-items: center; gap: var(--space-4); }
+
+/* ── Connection Health Badge ─── */
+.health-badge {
+  position: relative; display: flex; align-items: center;
+  cursor: default; padding: 4px;
+}
+.health-dot-wrap {
+  position: relative; display: flex; align-items: center; justify-content: center;
+}
+.health-dot {
+  position: absolute; bottom: -1px; right: -1px;
+  width: 6px; height: 6px; border-radius: 50%;
+  border: 1.5px solid var(--bg-app, #111);
+}
+.health-spinner { animation: healthSpin 1s linear infinite; }
+@keyframes healthSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.health-tooltip {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 9999;
+  min-width: 200px; padding: 10px 12px;
+  background: var(--bg-card, #1a1a2e);
+  border: 1px solid var(--border, #2a2a3e);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 12px; color: var(--text-secondary, #aaa);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.health-tooltip-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+}
+.health-tooltip-label {
+  color: var(--text-muted, #666); font-size: 11px;
+}
+.health-tooltip-detail {
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px;
+}
+.health-recheck {
+  display: flex; align-items: center; gap: 4px; margin-top: 4px;
+  padding: 4px 8px; border-radius: 4px;
+  border: 1px solid var(--border, #2a2a3e);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #aaa);
+  font-size: 11px; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.health-recheck:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #e0e0e0);
+}
+.health-recheck:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.header-btn {
+  display: flex; align-items: center; justify-content: center;
+  height: 2rem; padding: 0 var(--space-5); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: none; gap: var(--space-3);
+  color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
+  font-size: var(--font-xs); font-family: inherit; font-weight: 500;
+}
+.header-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); border-color: var(--text-muted); }
+

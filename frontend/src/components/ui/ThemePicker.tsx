@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { Palette, Paintbrush, Save, Trash2, Loader2, Check } from "lucide-react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Palette, Paintbrush, Save, Trash2, Loader2, Check, ChevronDown, ChevronRight, Sun, Moon } from "lucide-react";
 import { useStore } from "@/hooks/useStore";
 import {
   fetchCustomThemes,
@@ -9,46 +9,139 @@ import {
 } from "@/lib/api";
 import type { ColorScheme, CustomThemeColors, Density, SavedCustomTheme } from "@/types/dashboard";
 
-const COLOR_SCHEMES: { id: ColorScheme; label: string; preview: [string, string, string] }[] = [
-  { id: "dark",       label: "Dark",       preview: ["#09090b", "#18181b", "#3b82f6"] },
-  { id: "light",      label: "Light",      preview: ["#f4f4f5", "#ffffff", "#2563eb"] },
-  { id: "nike",       label: "Nike",       preview: ["#0a0a0a", "#1c1c1c", "#FA5400"] },
-  { id: "midnight",   label: "Midnight",   preview: ["#0c0f1a", "#161d35", "#818cf8"] },
-  { id: "slate",      label: "Slate",      preview: ["#f8fafc", "#f1f5f9", "#7c3aed"] },
-  { id: "minimal",    label: "Minimal",    preview: ["#fafafa", "#ffffff", "#2563eb"] },
-  { id: "nord",       label: "Nord",       preview: ["#2e3440", "#434c5e", "#88c0d0"] },
-  { id: "corporate",  label: "Corporate",  preview: ["#0f0f0f", "#212121", "#e04332"] },
+const COLOR_SCHEMES: { id: ColorScheme; label: string; preview: [string, string, string]; dark: boolean }[] = [
+  { id: "nike",        label: "Nike Dark",   preview: ["#0a0a0a", "#1c1c1c", "#FA5400"], dark: true },
+  { id: "nike-light",  label: "Nike Light",  preview: ["#faf8f5", "#ffffff", "#c4540a"], dark: false },
+  { id: "dark",        label: "Dark",        preview: ["#09090b", "#18181b", "#3b82f6"], dark: true },
+  { id: "light",       label: "Light",       preview: ["#f4f4f5", "#ffffff", "#2563eb"], dark: false },
+  { id: "midnight",    label: "Midnight",    preview: ["#0c0f1a", "#161d35", "#818cf8"], dark: true },
+  { id: "nord",        label: "Nord",        preview: ["#2e3440", "#434c5e", "#88c0d0"], dark: true },
+  { id: "slate",       label: "Slate",       preview: ["#f8fafc", "#f1f5f9", "#7c3aed"], dark: false },
+  { id: "minimal",     label: "Minimal",     preview: ["#fafafa", "#ffffff", "#2563eb"], dark: false },
+  { id: "corporate",   label: "Corporate",   preview: ["#0f0f0f", "#212121", "#e04332"], dark: true },
 ];
 
-const DENSITY_OPTIONS: { id: Density; label: string }[] = [
-  { id: "compact",     label: "Compact" },
-  { id: "comfortable", label: "Comfortable" },
-  { id: "spacious",    label: "Spacious" },
+const DENSITY_OPTIONS: { id: Density; label: string; desc: string }[] = [
+  { id: "compact",     label: "Compact",     desc: "Dense layout" },
+  { id: "comfortable", label: "Comfortable", desc: "Default spacing" },
+  { id: "spacious",    label: "Spacious",    desc: "Relaxed layout" },
 ];
 
-const DEFAULT_CUSTOM: CustomThemeColors = {
-  bgApp: "#09090b",
-  bgSidebar: "#111113",
-  bgCard: "#18181b",
-  bgInput: "#09090b",
-  border: "#27272a",
-  textPrimary: "#fafafa",
-  textSecondary: "#a1a1aa",
-  textMuted: "#52525b",
-  accent: "#3b82f6",
+const DARK_DEFAULTS: CustomThemeColors = {
+  bgApp: "#09090b", bgSidebar: "#111113", bgCard: "#18181b", bgCardHover: "#27272a",
+  bgInput: "#09090b", border: "#27272a", borderFocus: "#3b82f6",
+  textPrimary: "#fafafa", textSecondary: "#a1a1aa", textMuted: "#52525b",
+  accent: "#3b82f6", accentHover: "#60a5fa", accentSubtle: "rgba(59,130,246,0.10)",
+  danger: "#ef4444", success: "#22c55e", warning: "#eab308",
+  radius: "8px", shadow: "0 2px 8px rgba(0,0,0,0.4)",
 };
 
-const COLOR_FIELDS: { key: keyof CustomThemeColors; label: string }[] = [
-  { key: "bgApp",         label: "Background" },
-  { key: "bgSidebar",     label: "Sidebar" },
-  { key: "bgCard",        label: "Card" },
-  { key: "bgInput",       label: "Input" },
-  { key: "border",        label: "Border" },
-  { key: "textPrimary",   label: "Text" },
-  { key: "textSecondary", label: "Text 2nd" },
-  { key: "textMuted",     label: "Text muted" },
-  { key: "accent",        label: "Accent" },
+const LIGHT_DEFAULTS: CustomThemeColors = {
+  bgApp: "#f4f4f5", bgSidebar: "#fafafa", bgCard: "#ffffff", bgCardHover: "#f4f4f5",
+  bgInput: "#ececed", border: "#d4d4d8", borderFocus: "#2563eb",
+  textPrimary: "#18181b", textSecondary: "#3f3f46", textMuted: "#71717a",
+  accent: "#2563eb", accentHover: "#1d4ed8", accentSubtle: "rgba(37,99,235,0.07)",
+  danger: "#dc2626", success: "#16a34a", warning: "#ca8a04",
+  radius: "8px", shadow: "0 1px 6px rgba(0,0,0,0.1)",
+};
+
+interface ColorField {
+  key: keyof CustomThemeColors;
+  label: string;
+  hint: string;
+}
+
+const CORE_FIELDS: ColorField[] = [
+  { key: "bgApp",       label: "App Background",    hint: "Main page background" },
+  { key: "bgSidebar",   label: "Sidebar & Header",  hint: "Side panel, top bar, status bar" },
+  { key: "bgCard",      label: "Cards & Panels",     hint: "Content containers, dropdowns" },
+  { key: "bgInput",     label: "Input Fields",       hint: "Text inputs, search boxes" },
+  { key: "accent",      label: "Accent Color",       hint: "Buttons, links, active states" },
+  { key: "textPrimary", label: "Primary Text",       hint: "Headings, main content" },
+  { key: "textSecondary", label: "Secondary Text",   hint: "Descriptions, labels" },
+  { key: "textMuted",   label: "Muted Text",         hint: "Hints, placeholders, disabled" },
+  { key: "border",      label: "Borders",            hint: "Dividers, card edges" },
 ];
+
+const ADVANCED_FIELDS: ColorField[] = [
+  { key: "bgCardHover",  label: "Card Hover",      hint: "Card background on hover" },
+  { key: "borderFocus",  label: "Focus Border",     hint: "Input border when focused" },
+  { key: "accentHover",  label: "Accent Hover",     hint: "Buttons on hover" },
+  { key: "accentSubtle", label: "Accent Subtle",    hint: "Soft accent backgrounds" },
+  { key: "danger",       label: "Danger / Error",   hint: "Delete buttons, error messages" },
+  { key: "success",      label: "Success",          hint: "Success indicators, checkmarks" },
+  { key: "warning",      label: "Warning",          hint: "Warning badges, alerts" },
+];
+
+function isColorValue(val: string | undefined): boolean {
+  if (!val) return false;
+  return val.startsWith("#") || val.startsWith("rgb") || val.startsWith("hsl");
+}
+
+function MiniPreview({ colors }: { colors: CustomThemeColors }) {
+  const bg = colors.bgApp;
+  const sb = colors.bgSidebar;
+  const card = colors.bgCard;
+  const txt = colors.textPrimary;
+  const txtM = colors.textMuted;
+  const acc = colors.accent;
+  const brd = colors.border;
+
+  return (
+    <div className="tp-preview" style={{ background: bg, borderColor: brd }}>
+      <div className="tp-preview-sidebar" style={{ background: sb, borderColor: brd }}>
+        <div className="tp-preview-sidebar-item" style={{ background: acc, opacity: 0.2 }} />
+        <div className="tp-preview-sidebar-item" />
+        <div className="tp-preview-sidebar-item" />
+      </div>
+      <div className="tp-preview-main">
+        <div className="tp-preview-header" style={{ background: sb, borderColor: brd }}>
+          <div className="tp-preview-tab" style={{ background: acc }} />
+          <div className="tp-preview-tab" style={{ background: brd }} />
+        </div>
+        <div className="tp-preview-body">
+          <div className="tp-preview-card" style={{ background: card, borderColor: brd }}>
+            <div className="tp-preview-text" style={{ background: txt, opacity: 0.7 }} />
+            <div className="tp-preview-text tp-preview-text--short" style={{ background: txtM, opacity: 0.4 }} />
+          </div>
+          <div className="tp-preview-card" style={{ background: card, borderColor: brd }}>
+            <div className="tp-preview-bar" style={{ background: acc }} />
+            <div className="tp-preview-bar tp-preview-bar--sm" style={{ background: acc, opacity: 0.5 }} />
+          </div>
+        </div>
+        <div className="tp-preview-statusbar" style={{ background: sb, borderColor: brd }} />
+      </div>
+    </div>
+  );
+}
+
+function ColorInput({ field, value, onChange }: { field: ColorField; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="tp-color-field">
+      <div className="tp-color-field-info">
+        <span className="tp-color-field-label">{field.label}</span>
+        <span className="tp-color-field-hint">{field.hint}</span>
+      </div>
+      <div className="tp-color-field-inputs">
+        {isColorValue(value) && (
+          <input
+            type="color"
+            value={value.startsWith("#") ? value : "#000000"}
+            onChange={(e) => onChange(e.target.value)}
+            className="tp-color-swatch"
+          />
+        )}
+        <input
+          type="text"
+          value={value ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          className="tp-color-hex"
+          placeholder={field.key === "radius" ? "8px" : field.key === "shadow" ? "0 2px 8px ..." : "#000000"}
+        />
+      </div>
+    </div>
+  );
+}
 
 export default function ThemePicker() {
   const {
@@ -57,8 +150,9 @@ export default function ThemePicker() {
   } = useStore();
 
   const [open, setOpen] = useState(false);
-  const [showCustom, setShowCustom] = useState(false);
-  const [draft, setDraft] = useState<CustomThemeColors>(themeConfig.customColors ?? DEFAULT_CUSTOM);
+  const [view, setView] = useState<"themes" | "create">("themes");
+  const [draft, setDraft] = useState<CustomThemeColors>(themeConfig.customColors ?? DARK_DEFAULTS);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -69,7 +163,7 @@ export default function ThemePicker() {
     try {
       const themes = await fetchCustomThemes();
       setSavedCustomThemes(themes);
-    } catch { /* ignore on failure */ }
+    } catch { /* ignore */ }
     setLoaded(true);
   }, [setSavedCustomThemes]);
 
@@ -82,7 +176,7 @@ export default function ThemePicker() {
     const handleClick = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
         setOpen(false);
-        setShowCustom(false);
+        setView("themes");
         setEditingId(null);
         setSaveName("");
       }
@@ -91,8 +185,17 @@ export default function ThemePicker() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
-  const applyCustom = () => {
-    setCustomColors(draft);
+  const updateDraft = useCallback((key: keyof CustomThemeColors, value: string) => {
+    setDraft((d) => ({ ...d, [key]: value }));
+  }, []);
+
+  const applyDraft = () => setCustomColors(draft);
+
+  const startFromBase = (base: "dark" | "light") => {
+    const defaults = base === "dark" ? DARK_DEFAULTS : LIGHT_DEFAULTS;
+    setDraft({ ...defaults });
+    setEditingId(null);
+    setView("create");
   };
 
   const handleSaveNew = async () => {
@@ -134,8 +237,11 @@ export default function ThemePicker() {
   const startEdit = (theme: SavedCustomTheme) => {
     setDraft(theme.colors);
     setEditingId(theme.id);
-    setShowCustom(true);
+    setView("create");
   };
+
+  const darkSchemes = useMemo(() => COLOR_SCHEMES.filter((s) => s.dark), []);
+  const lightSchemes = useMemo(() => COLOR_SCHEMES.filter((s) => !s.dark), []);
 
   return (
     <div className="theme-picker-wrap" ref={wrapRef}>
@@ -145,64 +251,77 @@ export default function ThemePicker() {
       </button>
 
       {open && (
-        <div className="theme-picker-dropdown">
-          {!showCustom ? (
-            <>
-              <div className="theme-picker-section">
-                <div className="theme-picker-label">Color Scheme</div>
-                <div className="theme-picker-grid theme-picker-grid--wide">
-                  {COLOR_SCHEMES.map((s) => (
+        <div className="theme-picker-dropdown tp-dropdown">
+          {view === "themes" ? (
+            <div className="tp-themes-view">
+              {/* Dark themes */}
+              <div className="tp-section">
+                <div className="tp-section-label"><Moon size={11} /> Dark Themes</div>
+                <div className="tp-scheme-grid">
+                  {darkSchemes.map((s) => (
                     <button
                       key={s.id}
-                      className={`theme-swatch ${themeConfig.colorScheme === s.id ? "theme-swatch--active" : ""}`}
+                      className={`tp-scheme${themeConfig.colorScheme === s.id ? " tp-scheme--active" : ""}`}
                       onClick={() => setColorScheme(s.id)}
                     >
-                      <div className="theme-swatch-preview">
-                        {s.preview.map((c, i) => (
-                          <span key={i} style={{ background: c }} />
-                        ))}
+                      <div className="tp-scheme-colors">
+                        {s.preview.map((c, i) => <span key={i} style={{ background: c }} />)}
                       </div>
-                      <span className="theme-swatch-name">{s.label}</span>
+                      <span className="tp-scheme-name">{s.label}</span>
+                      {themeConfig.colorScheme === s.id && <Check size={10} className="tp-scheme-check" />}
                     </button>
                   ))}
                 </div>
               </div>
 
+              {/* Light themes */}
+              <div className="tp-section">
+                <div className="tp-section-label"><Sun size={11} /> Light Themes</div>
+                <div className="tp-scheme-grid">
+                  {lightSchemes.map((s) => (
+                    <button
+                      key={s.id}
+                      className={`tp-scheme${themeConfig.colorScheme === s.id ? " tp-scheme--active" : ""}`}
+                      onClick={() => setColorScheme(s.id)}
+                    >
+                      <div className="tp-scheme-colors">
+                        {s.preview.map((c, i) => <span key={i} style={{ background: c }} />)}
+                      </div>
+                      <span className="tp-scheme-name">{s.label}</span>
+                      {themeConfig.colorScheme === s.id && <Check size={10} className="tp-scheme-check" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Saved custom themes */}
               {savedCustomThemes.length > 0 && (
-                <div className="theme-picker-section">
-                  <div className="theme-picker-label">My Themes</div>
-                  <div className="saved-themes-list">
+                <div className="tp-section">
+                  <div className="tp-section-label"><Paintbrush size={11} /> My Custom Themes</div>
+                  <div className="tp-saved-list">
                     {savedCustomThemes.map((t) => (
-                      <div key={t.id} className="saved-theme-row">
+                      <div key={t.id} className="tp-saved-row">
                         <button
-                          className={`saved-theme-btn ${
+                          className={`tp-saved-btn${
                             themeConfig.colorScheme === "custom" &&
                             themeConfig.customColors?.accent === t.colors.accent &&
                             themeConfig.customColors?.bgApp === t.colors.bgApp
-                              ? "saved-theme-btn--active" : ""
+                              ? " tp-saved-btn--active" : ""
                           }`}
                           onClick={() => handleLoadSaved(t)}
                         >
-                          <span className="saved-theme-preview">
+                          <span className="tp-saved-preview">
                             <span style={{ background: t.colors.bgApp }} />
-                            <span style={{ background: t.colors.bgCard }} />
+                            <span style={{ background: t.colors.bgSidebar }} />
                             <span style={{ background: t.colors.accent }} />
                           </span>
-                          <span className="saved-theme-name">{t.name}</span>
+                          <span className="tp-saved-name">{t.name}</span>
                         </button>
-                        <button
-                          className="saved-theme-edit"
-                          onClick={() => startEdit(t)}
-                          title="Edit theme"
-                        >
-                          <Paintbrush size={11} />
+                        <button className="tp-saved-action" onClick={() => startEdit(t)} title="Edit">
+                          <Paintbrush size={10} />
                         </button>
-                        <button
-                          className="saved-theme-delete"
-                          onClick={() => handleDelete(t.id)}
-                          title="Delete theme"
-                        >
-                          <Trash2 size={11} />
+                        <button className="tp-saved-action tp-saved-action--danger" onClick={() => handleDelete(t.id)} title="Delete">
+                          <Trash2 size={10} />
                         </button>
                       </div>
                     ))}
@@ -210,101 +329,153 @@ export default function ThemePicker() {
                 </div>
               )}
 
-              <div className="theme-picker-section">
-                <div className="theme-picker-label">Density</div>
-                <div className="density-btns">
+              {/* Density */}
+              <div className="tp-section">
+                <div className="tp-section-label">Spacing</div>
+                <div className="tp-density-row">
                   {DENSITY_OPTIONS.map((d) => (
                     <button
                       key={d.id}
-                      className={`density-btn ${themeConfig.density === d.id ? "density-btn--active" : ""}`}
+                      className={`tp-density${themeConfig.density === d.id ? " tp-density--active" : ""}`}
                       onClick={() => setDensity(d.id)}
                     >
-                      {d.label}
+                      <span className="tp-density-label">{d.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className="theme-picker-section">
-                <button
-                  className={`custom-theme-link ${themeConfig.colorScheme === "custom" ? "custom-theme-link--active" : ""}`}
-                  onClick={() => { setShowCustom(true); setEditingId(null); }}
-                >
-                  <Paintbrush size={12} /> Create Custom Theme
-                </button>
+              {/* Create custom theme */}
+              <div className="tp-section tp-section--create">
+                <div className="tp-section-label">Create Your Own</div>
+                <div className="tp-base-btns">
+                  <button className="tp-base-btn" onClick={() => startFromBase("dark")}>
+                    <Moon size={12} /> Start from Dark
+                  </button>
+                  <button className="tp-base-btn" onClick={() => startFromBase("light")}>
+                    <Sun size={12} /> Start from Light
+                  </button>
+                </div>
               </div>
-            </>
+            </div>
           ) : (
-            <div className="custom-theme-editor">
-              <div className="theme-picker-label">
-                {editingId ? "Edit Custom Theme" : "New Custom Theme"}
-              </div>
-              <div className="custom-theme-grid">
-                {COLOR_FIELDS.map((f) => (
-                  <label key={f.key} className="custom-theme-field">
-                    <span className="custom-theme-field-label">{f.label}</span>
-                    <div className="custom-theme-input-wrap">
-                      <input
-                        type="color"
-                        value={draft[f.key]}
-                        onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
-                        className="custom-theme-color"
-                      />
-                      <input
-                        type="text"
-                        value={draft[f.key]}
-                        onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
-                        className="custom-theme-hex"
-                      />
-                    </div>
-                  </label>
-                ))}
+            /* ── Custom Theme Editor ── */
+            <div className="tp-editor-view">
+              <div className="tp-editor-header">
+                <button className="tp-back-btn" onClick={() => { setView("themes"); setEditingId(null); setSaveName(""); }}>
+                  &larr; Back
+                </button>
+                <span className="tp-editor-title">
+                  {editingId ? "Edit Theme" : "Create Theme"}
+                </span>
               </div>
 
-              <div className="custom-theme-save-section">
-                {editingId ? (
-                  <div className="custom-theme-save-row">
-                    <button
-                      className="data-load-btn"
-                      onClick={() => {
-                        const t = savedCustomThemes.find((s) => s.id === editingId);
-                        if (t) handleOverwrite(t);
-                      }}
-                      disabled={saving}
-                    >
-                      {saving ? <Loader2 size={12} className="spin" /> : <Save size={12} />}
-                      Update
-                    </button>
+              {/* Live preview */}
+              <div className="tp-section">
+                <div className="tp-section-label">Live Preview</div>
+                <MiniPreview colors={draft} />
+              </div>
+
+              {/* Core colors */}
+              <div className="tp-section">
+                <div className="tp-section-label">Core Colors</div>
+                <div className="tp-color-list">
+                  {CORE_FIELDS.map((f) => (
+                    <ColorInput
+                      key={f.key}
+                      field={f}
+                      value={(draft[f.key] as string) ?? ""}
+                      onChange={(v) => updateDraft(f.key, v)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Advanced */}
+              <div className="tp-section">
+                <button className="tp-advanced-toggle" onClick={() => setShowAdvanced((v) => !v)}>
+                  {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  Advanced Options
+                  <span className="tp-advanced-hint">(hover states, status colors, radius)</span>
+                </button>
+                {showAdvanced && (
+                  <div className="tp-color-list tp-color-list--advanced">
+                    {ADVANCED_FIELDS.map((f) => (
+                      <ColorInput
+                        key={f.key}
+                        field={f}
+                        value={(draft[f.key] as string) ?? ""}
+                        onChange={(v) => updateDraft(f.key, v)}
+                      />
+                    ))}
+                    <div className="tp-color-field">
+                      <div className="tp-color-field-info">
+                        <span className="tp-color-field-label">Border Radius</span>
+                        <span className="tp-color-field-hint">Roundness of corners (e.g. 8px, 4px, 0)</span>
+                      </div>
+                      <div className="tp-color-field-inputs">
+                        <input
+                          type="text"
+                          value={draft.radius ?? "8px"}
+                          onChange={(e) => updateDraft("radius", e.target.value)}
+                          className="tp-color-hex"
+                          placeholder="8px"
+                        />
+                      </div>
+                    </div>
+                    <div className="tp-color-field">
+                      <div className="tp-color-field-info">
+                        <span className="tp-color-field-label">Box Shadow</span>
+                        <span className="tp-color-field-hint">Shadow depth for cards and panels</span>
+                      </div>
+                      <div className="tp-color-field-inputs">
+                        <input
+                          type="text"
+                          value={draft.shadow ?? "0 2px 8px rgba(0,0,0,0.4)"}
+                          onChange={(e) => updateDraft("shadow", e.target.value)}
+                          className="tp-color-hex tp-color-hex--wide"
+                          placeholder="0 2px 8px rgba(0,0,0,0.4)"
+                        />
+                      </div>
+                    </div>
                   </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="tp-editor-actions">
+                <button className="tp-apply-btn" onClick={applyDraft}>
+                  <Check size={12} /> Apply
+                </button>
+
+                {editingId ? (
+                  <button
+                    className="tp-save-btn"
+                    onClick={() => {
+                      const t = savedCustomThemes.find((s) => s.id === editingId);
+                      if (t) handleOverwrite(t);
+                    }}
+                    disabled={saving}
+                  >
+                    {saving ? <Loader2 size={12} className="spin" /> : <Save size={12} />}
+                    Update
+                  </button>
                 ) : (
-                  <div className="custom-theme-save-row">
+                  <div className="tp-save-row">
                     <input
                       type="text"
-                      className="custom-theme-name-input"
+                      className="tp-save-input"
                       placeholder="Theme name..."
                       value={saveName}
                       onChange={(e) => setSaveName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") handleSaveNew(); }}
                     />
-                    <button
-                      className="data-load-btn"
-                      onClick={handleSaveNew}
-                      disabled={!saveName.trim() || saving}
-                    >
+                    <button className="tp-save-btn" onClick={handleSaveNew} disabled={!saveName.trim() || saving}>
                       {saving ? <Loader2 size={12} className="spin" /> : <Save size={12} />}
                       Save
                     </button>
                   </div>
                 )}
-              </div>
-
-              <div className="custom-theme-actions">
-                <button className="colpick-btn" onClick={() => { setShowCustom(false); setEditingId(null); setSaveName(""); }}>
-                  Back
-                </button>
-                <button className="data-load-btn" onClick={applyCustom}>
-                  <Check size={12} /> Apply Preview
-                </button>
               </div>
             </div>
           )}

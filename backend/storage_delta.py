@@ -113,23 +113,46 @@ _DDL = {
             updated_at TIMESTAMP
         ) USING DELTA
     """,
+    "app_settings": f"""
+        CREATE TABLE IF NOT EXISTS {_fqn("app_settings")} (
+            id STRING NOT NULL,
+            data STRING NOT NULL,
+            updated_at TIMESTAMP
+        ) USING DELTA
+    """,
 }
 
 
 def ensure_tables() -> None:
     """Create metadata tables if they don't exist. Safe to call on every startup."""
-    logger.info(
-        "Ensuring metadata tables in %s.%s …", _META_CATALOG, _META_SCHEMA,
-    )
+    fqn_schema = f"`{_META_CATALOG}`.`{_META_SCHEMA}`"
+    total = len(_DDL)
+
+    print(f"\n{'─' * 58}")
+    print(f"  Initializing metadata storage")
+    print(f"  Schema: {fqn_schema}")
+    print(f"{'─' * 58}")
+    logger.info("Ensuring metadata tables in %s.%s …", _META_CATALOG, _META_SCHEMA)
+
     conn = _get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        f"CREATE SCHEMA IF NOT EXISTS `{_META_CATALOG}`.`{_META_SCHEMA}`"
-    )
-    for name, ddl in _DDL.items():
-        logger.info("  → %s", _fqn(name))
+
+    print(f"  [1/{total + 1}] Creating schema {fqn_schema} … ", end="", flush=True)
+    cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {fqn_schema}")
+    print("done")
+
+    for i, (name, ddl) in enumerate(_DDL.items(), start=2):
+        fqn_table = _fqn(name)
+        print(f"  [{i}/{total + 1}] Creating table {fqn_table} … ", end="", flush=True)
+        logger.info("  → %s", fqn_table)
         cursor.execute(ddl)
+        print("done")
+
     cursor.close()
+
+    print(f"{'─' * 58}")
+    print(f"  ✔ All {total} metadata tables ready")
+    print(f"{'─' * 58}\n")
     logger.info("Metadata tables ready.")
 
 
@@ -536,3 +559,14 @@ def delete_shared_formulas_by_workspace(workspace_id: str) -> None:
         f"WHERE workspace_id = '{_escape(workspace_id)}'"
     )
     cursor.close()
+
+
+# App settings (singleton, id = "default")
+
+def get_app_settings() -> dict[str, Any] | None:
+    return _load_one("app_settings", "default")
+
+
+def upsert_app_settings(settings: dict[str, Any]) -> None:
+    settings["id"] = "default"
+    _upsert_row("app_settings", "default", json.dumps(settings, default=str))

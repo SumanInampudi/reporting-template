@@ -55,6 +55,9 @@ if _BACKEND == "delta":
         get_shared_formula,
         load_shared_formulas_by_workspace,
         upsert_shared_formula,
+        # App settings
+        get_app_settings,
+        upsert_app_settings,
     )
 else:
     logger.info("Storage backend: YAML (local files)")
@@ -94,6 +97,9 @@ else:
         get_shared_formula,
         load_shared_formulas_by_workspace,
         upsert_shared_formula,
+        # App settings
+        get_app_settings,
+        upsert_app_settings,
     )
 
     def ensure_tables() -> None:

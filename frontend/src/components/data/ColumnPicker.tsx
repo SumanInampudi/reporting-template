@@ -14,8 +14,11 @@ export default function ColumnPicker() {
   const alias = useColumnAlias();
   const [modalOpen, setModalOpen] = useState(false);
 
-  const fqTable = selectedCatalog && selectedSchema && selectedTable
-    ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : selectedTable;
+  const isCustomQuery = useStore((s) => s.activeWorkspace?.datasource?.source_mode === "query");
+  const fqTable = isCustomQuery
+    ? (selectedTable ? "__custom_source__" : null)
+    : (selectedCatalog && selectedSchema && selectedTable
+      ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : selectedTable);
 
   const allCols = useMemo(
     () => (fqTable ? (columns[fqTable] ?? []) : []),

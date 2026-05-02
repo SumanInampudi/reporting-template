@@ -1,5 +1,48 @@
-import { Database, Filter, Clock, Rows3, Columns3, AlertCircle, Save, Timer, Server } from "lucide-react";
+import { useState } from "react";
+import { Database, Filter, Clock, Rows3, Columns3, AlertCircle, Save, Timer, Server, Keyboard } from "lucide-react";
 import { useStore } from "@/hooks/useStore";
+
+const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
+const MOD = IS_MAC ? "⌘" : "Ctrl";
+
+const SHORTCUTS = [
+  { keys: `${MOD} + Enter`, action: "Load Data" },
+  { keys: `${MOD} + E`, action: "Export CSV" },
+  { keys: `${MOD} + S`, action: "Save Preset" },
+  { keys: "F11", action: "Focus Mode" },
+  { keys: "Esc", action: "Exit Focus" },
+];
+
+function ShortcutHelp() {
+  const [show, setShow] = useState(false);
+  return (
+    <span
+      className="status-bar-item status-bar-shortcuts"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      <Keyboard size={11} /> Shortcuts
+      {show && (
+        <div className="shortcut-popup">
+          <div className="shortcut-popup-title">Keyboard Shortcuts</div>
+          {SHORTCUTS.map((s) => (
+            <div key={s.keys} className="shortcut-row">
+              <span className="shortcut-action">{s.action}</span>
+              <span className="shortcut-keys">
+                {s.keys.split(" + ").map((k, i) => (
+                  <span key={i}>
+                    {i > 0 && <span className="shortcut-plus">+</span>}
+                    <kbd className="shortcut-kbd">{k}</kbd>
+                  </span>
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
 
 function fmtMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -14,14 +57,16 @@ export default function StatusBar() {
     filters, lastQueryMs, estimatedRowCount,
   } = useStore();
 
-  const fqTable =
-    selectedCatalog && selectedSchema && selectedTable
+  const isCustomQuery = useStore((s) => s.activeWorkspace?.datasource?.source_mode === "query");
+  const fqTable = isCustomQuery
+    ? "Custom Query"
+    : (selectedCatalog && selectedSchema && selectedTable
       ? `${selectedCatalog}.${selectedSchema}.${selectedTable}`
-      : null;
+      : null);
 
   const previewCount = baseDataset?.rows.length ?? 0;
   const totalRows = estimatedRowCount ?? previewCount;
-  const colCount = baseDataset?.columns.filter((c) => c !== "__row_number__").length ?? 0;
+  const colCount = baseDataset?.columns.filter((c) => c !== "__row_number__" && c !== "__row_count__").length ?? 0;
   const filterCount = appliedFilters.filter(
     (f) => f.selectedValues.length > 0 || (f.dateFrom && f.dateTo),
   ).length;
@@ -93,6 +138,7 @@ export default function StatusBar() {
             <Clock size={11} /> {lastRefreshTime}
           </span>
         )}
+        <ShortcutHelp />
       </div>
     </footer>
   );

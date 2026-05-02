@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, Plus, HelpCircle } from "lucide-react";
 import { useStore } from "@/hooks/useStore";
 import UserAvatar from "./UserAvatar";
 
@@ -11,6 +11,9 @@ interface NavLink {
 
 interface Props {
   links: NavLink[];
+  onNewWorkspace?: () => void;
+  onHelp?: () => void;
+  isAdmin?: boolean;
 }
 
 const STORAGE_KEY = "nike-mode";
@@ -26,14 +29,18 @@ export function useNikeLight() {
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
-export default function HomeNav({ links }: Props) {
-  const { currentUser } = useStore();
+export default function HomeNav({ links, onNewWorkspace, onHelp, isAdmin }: Props) {
+  const { currentUser, teamName, platformTagline } = useStore();
   const nikeLight = useNikeLight();
 
   return (
     <nav className="home-nav" data-theme={nikeLight ? "nike-light" : "nike"}>
       <div className="home-nav-left">
         <img src="/brand-logo.png" alt="Brand" className="home-nav-brand-img" />
+        <div className="home-nav-title-group">
+          <span className="home-nav-brand">{teamName}</span>
+          <span className="home-nav-sub">{platformTagline}</span>
+        </div>
       </div>
       <div className="home-nav-links">
         {links.map((link) => (
@@ -48,6 +55,16 @@ export default function HomeNav({ links }: Props) {
         ))}
       </div>
       <div className="home-nav-right">
+        {isAdmin && onNewWorkspace && (
+          <button className="home-nav-new-btn" onClick={onNewWorkspace}>
+            <Plus size={14} /> New
+          </button>
+        )}
+        {onHelp && (
+          <button className="home-theme-toggle" onClick={onHelp} title="Take a tour">
+            <HelpCircle size={16} />
+          </button>
+        )}
         <button
           className="home-theme-toggle"
           onClick={toggle}

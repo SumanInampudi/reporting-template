@@ -58,11 +58,14 @@ export default function SelectionSummaryModal({ onClose }: Props) {
     activeWorkspace, effectiveRowLimit,
   } = useStore();
 
-  const aggs = activeWorkspace?.column_aggregations ?? {};
+  const aggs = useStore.getState().resolvedAggregations();
   const aggEntries = Object.entries(aggs).filter(([col]) => selectedOutputColumns.includes(col));
   const limit = effectiveRowLimit();
-  const fqTable = selectedCatalog && selectedSchema && selectedTable
-    ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null;
+  const isCustomQuery = useStore((s) => s.activeWorkspace?.datasource?.source_mode === "query");
+  const fqTable = isCustomQuery
+    ? "Custom Query"
+    : (selectedCatalog && selectedSchema && selectedTable
+      ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null);
   const enabledDynamic = dynamicFilters.filter((d) => d.enabled);
 
   useEffect(() => {
@@ -80,7 +83,7 @@ export default function SelectionSummaryModal({ onClose }: Props) {
       lines.push("");
     }
     if (formulaColumns.length > 0) {
-      lines.push(`Custom Columns (${formulaColumns.length}):`);
+      lines.push(`Calculated Fields (${formulaColumns.length}):`);
       formulaColumns.forEach((fc) => lines.push(`  • ${fc.alias} = ${fc.expression}`));
       lines.push("");
     }
@@ -148,7 +151,7 @@ export default function SelectionSummaryModal({ onClose }: Props) {
             </div>
           </Section>
 
-          <Section icon={<FunctionSquare size={13} />} title="Custom Columns" count={formulaColumns.length}>
+          <Section icon={<FunctionSquare size={13} />} title="Calculated Fields" count={formulaColumns.length}>
             <div className="ss-list">
               {formulaColumns.map((fc) => (
                 <div key={fc.id} className="ss-formula">

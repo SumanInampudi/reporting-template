@@ -13,7 +13,7 @@ export interface CapabilityOption {
 
 export const CAPABILITIES: CapabilityOption[] = [
   {
-    id: "self_service", label: "Self-Service Data",
+    id: "self_service", label: "Data Explorer",
     desc: "Explore, filter, create formulas & export your data",
     icon: Database, available: true,
   },
@@ -23,7 +23,7 @@ export const CAPABILITIES: CapabilityOption[] = [
     icon: BarChart3, available: true,
   },
   {
-    id: "ai_insights", label: "AI Insights",
+    id: "ai_insights", label: "AI Assistant",
     desc: "Ask natural language questions about your data",
     icon: Brain, available: true,
   },
@@ -39,7 +39,9 @@ export interface FeatureToggle {
 
 export const SELF_SERVICE_FEATURES: FeatureToggle[] = [
   { id: "download_data", label: "Download Data (CSV)" },
-  { id: "custom_columns", label: "Custom Columns (Formulas)" },
+  { id: "export_excel", label: "Export to Excel (.xlsx)" },
+  { id: "custom_columns", label: "Calculated Fields (Formulas)" },
+  { id: "upload_data", label: "Upload & Join Data (CSV)" },
   { id: "subscriptions", label: "Subscriptions" },
   { id: "presets", label: "Presets" },
 ];
@@ -82,8 +84,8 @@ export const AI_OPTIONS: AiOptionConfig[] = [
     id: "zenie_space", label: "Genie",
     desc: "Natural language conversation with your data via Genie AI",
     icon: Sparkles,
-    endpointLabel: "Genie Endpoint URL",
-    endpointPlaceholder: "https://genie.databricks.com/api/v1",
+    endpointLabel: "Genie Space ID",
+    endpointPlaceholder: "e.g. 01ef8a…  (from your Genie Space URL)",
   },
   {
     id: "root_cause_analysis", label: "RCA",

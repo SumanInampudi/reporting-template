@@ -12,6 +12,7 @@ WORKSPACES_PATH = _ROOT / "workspaces.yaml"
 PRESETS_PATH = _ROOT / "presets.yaml"
 CUSTOM_THEMES_PATH = _ROOT / "custom_themes.yaml"
 ABBREVIATIONS_PATH = _ROOT / "abbreviations.yaml"
+APP_SETTINGS_PATH = _ROOT / "app_settings.yaml"
 
 
 def _load_yaml_list(path: Path, key: str) -> list[dict[str, Any]]:
@@ -274,3 +275,15 @@ def batch_save_subscriptions(
         else:
             kept.append(item)
     save_subscriptions(kept)
+
+
+# App settings (singleton)
+
+def get_app_settings() -> dict[str, Any] | None:
+    items = _load_yaml_list(APP_SETTINGS_PATH, "app_settings")
+    return items[0] if items else None
+
+
+def upsert_app_settings(settings: dict[str, Any]) -> None:
+    settings.setdefault("id", "default")
+    _save_yaml_list(APP_SETTINGS_PATH, "app_settings", [settings])

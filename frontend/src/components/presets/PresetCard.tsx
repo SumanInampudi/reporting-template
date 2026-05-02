@@ -1,10 +1,13 @@
-import { Play, Copy, Trash2, Globe, Lock, Pencil, Bell, BellRing, Loader2, Users, Star } from "lucide-react";
+import { Play, Copy, Trash2, Globe, Lock, Pencil, Bell, BellRing, Loader2, Users, Star, Shield } from "lucide-react";
 import type { Preset, Subscription } from "@/types/dashboard";
 
 interface Props {
   preset: Preset;
   isActive: boolean;
   isDefault?: boolean;
+  isAdminDefault?: boolean;
+  isMyDefault?: boolean;
+  isAdmin?: boolean;
   disabled?: boolean;
   showSubscribe?: boolean;
   subscriberCount: number;
@@ -16,6 +19,7 @@ interface Props {
   onRename: (preset: Preset) => void;
   onSubscribe: (preset: Preset) => void;
   onToggleDefault?: (preset: Preset) => void;
+  onToggleAdminDefault?: (preset: Preset) => void;
 }
 
 function timeAgo(iso: string): string {
@@ -41,8 +45,10 @@ function scheduleLabel(sub: Subscription): string {
 }
 
 export default function PresetCard({
-  preset, isActive, isDefault, disabled, showSubscribe = false, subscriberCount, mySubscription,
-  onLoad, onDuplicate, onDelete, onTogglePublic, onRename, onSubscribe, onToggleDefault,
+  preset, isActive, isDefault, isAdminDefault, isMyDefault, isAdmin,
+  disabled, showSubscribe = false, subscriberCount, mySubscription,
+  onLoad, onDuplicate, onDelete, onTogglePublic, onRename, onSubscribe,
+  onToggleDefault, onToggleAdminDefault,
 }: Props) {
   const isMeSubscribed = showSubscribe && !!mySubscription;
 
@@ -51,7 +57,9 @@ export default function PresetCard({
       {/* Left: info */}
       <div className="pc3-info">
         <span className="pc3-name">
-          {isDefault && <Star size={12} className="pc3-default-star" />}
+          {isAdminDefault && <span title="Workspace default"><Shield size={12} className="pc3-admin-default-icon" /></span>}
+          {isMyDefault && <span title="My default"><Star size={12} className="pc3-default-star" /></span>}
+          {!isAdminDefault && !isMyDefault && isDefault && <Star size={12} className="pc3-default-star" />}
           {preset.name}
         </span>
         <div className="pc3-meta">
@@ -98,12 +106,22 @@ export default function PresetCard({
         </button>
         {onToggleDefault && (
           <button
-            className={`pc3-btn${isDefault ? " pc3-btn--default" : ""}`}
+            className={`pc3-btn${isMyDefault ? " pc3-btn--default" : ""}`}
             onClick={() => onToggleDefault(preset)}
             disabled={disabled}
-            title={isDefault ? "Remove as default" : "Set as default"}
+            title={isMyDefault ? "Remove as my default" : "Set as my default"}
           >
-            <Star size={14} /> <span className="pc3-btn-label">{isDefault ? "Default" : "Set Default"}</span>
+            <Star size={14} /> <span className="pc3-btn-label">{isMyDefault ? "My Default" : "My Default"}</span>
+          </button>
+        )}
+        {isAdmin && onToggleAdminDefault && (
+          <button
+            className={`pc3-btn${isAdminDefault ? " pc3-btn--admin-default" : ""}`}
+            onClick={() => onToggleAdminDefault(preset)}
+            disabled={disabled}
+            title={isAdminDefault ? "Remove workspace default" : "Set as workspace default for all users"}
+          >
+            <Shield size={14} /> <span className="pc3-btn-label">{isAdminDefault ? "WS Default" : "WS Default"}</span>
           </button>
         )}
         <button className="pc3-btn pc3-btn--danger" onClick={() => onDelete(preset)} disabled={disabled} title="Delete">

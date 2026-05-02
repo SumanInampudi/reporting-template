@@ -88,19 +88,6 @@ def get_fallback_token(
     return _fetch_sp_token(scope, key)
 
 
-def list_secret_scopes() -> list[str]:
-    """Return the names of all secret scopes visible to the app."""
-    try:
-        from databricks.sdk import WorkspaceClient
-
-        client = WorkspaceClient()
-        scopes = client.secrets.list_scopes()
-        return [s.name for s in scopes if s.name]
-    except Exception:
-        logger.warning("Failed to list secret scopes", exc_info=True)
-    return []
-
-
 _RETRYABLE_AUTH_MARKERS = (
     "PERMISSION_DENIED",
     "not authorized",
@@ -295,15 +282,43 @@ def list_tables_in(cfg: AppConfig, catalog: str, schema: str) -> list[dict[str, 
     return _run_with_fallback(cfg, _exec)
 
 
-def describe_table_in(cfg: AppConfig, catalog: str, schema: str, table_name: str) -> list[dict[str, Any]]:
+def _parse_describe_result(rows: list[tuple], col_names: list[str]) -> dict[str, Any]:
+    """Split DESCRIBE TABLE output into real columns and partition column names.
+
+    Databricks appends partition metadata after a ``# Partition Information``
+    separator row.  We stop collecting columns at that marker and extract the
+    partition column names from the subsequent rows.
+    """
+    columns: list[dict[str, Any]] = []
+    partition_columns: list[str] = []
+    in_partition_section = False
+
+    for row in rows:
+        record = dict(zip(col_names, row))
+        name = (record.get("col_name") or "").strip()
+
+        if name.startswith("#") or name == "":
+            if "partition" in name.lower():
+                in_partition_section = True
+            continue
+
+        if in_partition_section:
+            partition_columns.append(name)
+        else:
+            columns.append(record)
+
+    return {"columns": columns, "partition_columns": partition_columns}
+
+
+def describe_table_in(cfg: AppConfig, catalog: str, schema: str, table_name: str) -> dict[str, Any]:
     fqn = f"`{catalog}`.`{schema}`.`{table_name}`"
-    def _exec(conn: Connection) -> list[dict[str, Any]]:
+    def _exec(conn: Connection) -> dict[str, Any]:
         cursor = conn.cursor()
         cursor.execute(f"DESCRIBE TABLE {fqn}")
         rows = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
+        col_names = [desc[0] for desc in cursor.description]
         cursor.close()
-        return [dict(zip(columns, row)) for row in rows]
+        return _parse_describe_result(rows, col_names)
     return _run_with_fallback(cfg, _exec)
 
 
@@ -321,18 +336,37 @@ def list_tables(cfg: AppConfig) -> list[dict[str, str]]:
     return _run_with_fallback(cfg, _exec)
 
 
-def describe_table(cfg: AppConfig, table_name: str) -> list[dict[str, str]]:
+def describe_table(cfg: AppConfig, table_name: str) -> dict[str, Any]:
     catalog = cfg.datasource.catalog
     schema = cfg.datasource.schema_name
     fqn = f"`{catalog}`.`{schema}`.`{table_name}`"
-    def _exec(conn: Connection) -> list[dict[str, str]]:
+    def _exec(conn: Connection) -> dict[str, Any]:
         cursor = conn.cursor()
         cursor.execute(f"DESCRIBE TABLE {fqn}")
         rows = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
+        col_names = [desc[0] for desc in cursor.description]
         cursor.close()
-        return [dict(zip(columns, row)) for row in rows]
+        return _parse_describe_result(rows, col_names)
     return _run_with_fallback(cfg, _exec)
+
+
+def _resolve_type_name(desc: tuple) -> str:
+    """Extract a human-readable type name from a PEP 249 cursor.description entry."""
+    raw = str(desc[1]) if len(desc) > 1 and desc[1] is not None else "STRING"
+    upper = raw.upper()
+    for kw in ("INT", "LONG", "SHORT", "BYTE", "BIGINT", "SMALLINT", "TINYINT"):
+        if kw in upper:
+            return kw if kw in ("BIGINT", "SMALLINT", "TINYINT") else "INT"
+    for kw in ("DOUBLE", "FLOAT", "DECIMAL", "NUMERIC"):
+        if kw in upper:
+            return kw if kw in ("DOUBLE", "FLOAT") else "DECIMAL"
+    if "BOOL" in upper:
+        return "BOOLEAN"
+    if "DATE" in upper and "TIME" not in upper:
+        return "DATE"
+    if "TIMESTAMP" in upper:
+        return "TIMESTAMP"
+    return "STRING"
 
 
 def run_query(cfg: AppConfig, sql: str, limit: int = 0) -> dict[str, Any]:
@@ -353,10 +387,12 @@ def run_query(cfg: AppConfig, sql: str, limit: int = 0) -> dict[str, Any]:
         cursor.execute(exec_sql)
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
+        column_types = [_resolve_type_name(desc) for desc in cursor.description]
         cursor.close()
 
         return {
             "columns": columns,
+            "column_types": column_types,
             "rows": [list(row) for row in rows],
         }
 

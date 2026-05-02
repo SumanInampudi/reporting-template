@@ -66,22 +66,33 @@ export async function fetchTablesIn(
   );
 }
 
+export interface ColumnsResponse {
+  columns: ColumnMeta[];
+  partition_columns: string[];
+}
+
 export async function fetchColumnsIn(
   catalog: string,
   schema: string,
   table: string
-): Promise<ColumnMeta[]> {
-  return fetchJSON(
+): Promise<ColumnsResponse> {
+  const res = await fetchJSON<ColumnsResponse | ColumnMeta[]>(
     `/catalogs/${encodeURIComponent(catalog)}/schemas/${encodeURIComponent(schema)}/tables/${encodeURIComponent(table)}/columns`
   );
+  if (Array.isArray(res)) return { columns: res, partition_columns: [] };
+  return res;
 }
 
 export async function fetchTables(): Promise<Record<string, string>[]> {
   return fetchJSON("/tables");
 }
 
-export async function fetchColumns(tableName: string): Promise<ColumnMeta[]> {
-  return fetchJSON(`/tables/${encodeURIComponent(tableName)}/columns`);
+export async function fetchColumns(tableName: string): Promise<ColumnsResponse> {
+  const res = await fetchJSON<ColumnsResponse | ColumnMeta[]>(
+    `/tables/${encodeURIComponent(tableName)}/columns`
+  );
+  if (Array.isArray(res)) return { columns: res, partition_columns: [] };
+  return res;
 }
 
 export async function runQuery(
@@ -144,16 +155,33 @@ export async function exportCsv(sql: string, filename: string = "export.csv"): P
   URL.revokeObjectURL(url);
 }
 
+export async function exportExcel(sql: string, filename: string = "export.xlsx"): Promise<void> {
+  const res = await fetch(`${BASE}/export-excel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql, filename }),
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  if (blob.size === 0) throw new Error("Server returned empty response");
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function fetchConfig(): Promise<Record<string, string>> {
   return fetchJSON("/config");
 }
 
 export async function testConnection(): Promise<{ ok: boolean; message: string }> {
   return fetchJSON("/test-connection", { method: "POST" });
-}
-
-export async function fetchSecretScopes(): Promise<string[]> {
-  return fetchJSON("/secret-scopes");
 }
 
 export async function fetchWorkspaces(): Promise<Workspace[]> {
@@ -172,12 +200,20 @@ export async function createWorkspace(data: {
   default_table?: string | null;
   capabilities?: string[];
   features?: string[];
+  dashboard_features?: string[];
   ai_settings?: Record<string, unknown>;
   column_aliases?: Record<string, string>;
+  column_type_overrides?: Record<string, string>;
+  column_aggregations?: Record<string, string>;
   excluded_columns?: string[];
   column_groups?: ColumnGroupConfig;
-  secret_scope?: string | null;
-  secret_key?: string | null;
+  dimension_sources?: unknown[];
+  cascade_rules?: unknown[];
+  abbreviations?: { word: string; abbr: string }[];
+  free_text_filter_columns?: string[];
+  search_select_columns?: string[];
+  single_select_columns?: string[];
+  free_text_validation_rules?: unknown[];
   theme?: string;
   density?: string;
   row_limit?: number;
@@ -200,8 +236,8 @@ export async function updateWorkspace(id: string, data: {
   column_aliases?: Record<string, string>;
   excluded_columns?: string[];
   column_groups?: ColumnGroupConfig;
-  secret_scope?: string | null;
-  secret_key?: string | null;
+  search_select_columns?: string[];
+  single_select_columns?: string[];
   row_limit?: number;
 }): Promise<Workspace> {
   return fetchJSON(`/workspaces/${encodeURIComponent(id)}`, {
@@ -213,6 +249,25 @@ export async function updateWorkspace(id: string, data: {
 export async function deleteWorkspace(id: string): Promise<void> {
   await fetchJSON(`/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+export async function fetchAppSettings(): Promise<Record<string, string>> {
+  return fetchJSON("/app-settings");
+}
+
+export async function saveAppSettings(data: Record<string, string | null>): Promise<Record<string, string>> {
+  return fetchJSON("/app-settings", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function setAdminDefaultPreset(workspaceId: string, presetId: string | null): Promise<Workspace> {
+  return fetchJSON(`/workspaces/${encodeURIComponent(workspaceId)}/default-preset`, {
+    method: "PATCH",
+    body: JSON.stringify({ preset_id: presetId }),
+  });
+}
+
 
 // ── Presets ──────────────────────────────────────────────────────────
 
@@ -404,5 +459,35 @@ export async function updateSharedFormula(
 export async function deleteSharedFormula(workspaceId: string, formulaId: string): Promise<void> {
   await fetchJSON(`${sharedFormulasUrl(workspaceId)}/${encodeURIComponent(formulaId)}`, {
     method: "DELETE",
+  });
+}
+
+/* ── Genie ────────────────────────────────────────────────────────── */
+
+export interface GenieResponse {
+  conversation_id: string;
+  message_id: string;
+  status: string;
+  text: string | null;
+  sql: string | null;
+  columns: string[] | null;
+  rows: (string | null)[][] | null;
+  error: string | null;
+}
+
+export async function askGenie(
+  spaceId: string,
+  question: string,
+  context?: string,
+  conversationId?: string,
+): Promise<GenieResponse> {
+  return fetchJSON("/genie/ask", {
+    method: "POST",
+    body: JSON.stringify({
+      space_id: spaceId,
+      question,
+      context: context || undefined,
+      conversation_id: conversationId || undefined,
+    }),
   });
 }

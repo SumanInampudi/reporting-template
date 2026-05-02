@@ -32,12 +32,6 @@ settings:
   max_row_limit: "${MAX_ROW_LIMIT}"
   query_timeout_seconds: "${QUERY_TIMEOUT_SECONDS}"
 
-features:
-  enable_charts: "${ENABLE_CHARTS}"
-  enable_presets: "${ENABLE_PRESETS}"
-  enable_sql_preview: "${ENABLE_SQL_PREVIEW}"
-  enable_csv_export: "${ENABLE_CSV_EXPORT}"
-
 cache:
   enabled: true
   ttl_seconds: 300

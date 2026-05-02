@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hash, Type } from "lucide-react";
 import { useStore } from "@/hooks/useStore";
+import { useColumnAlias } from "@/hooks/useColumnAlias";
 import { NUMERIC_RE } from "@/lib/constants";
 import type { ColumnMeta } from "@/types/dashboard";
 
@@ -12,14 +13,18 @@ interface Props {
 
 export default function FormulaExprInput({ value, onChange, placeholder }: Props) {
   const { columns, selectedCatalog, selectedSchema, selectedTable } = useStore();
+  const resolveAlias = useColumnAlias();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [suggestions, setSuggestions] = useState<ColumnMeta[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [tokenStart, setTokenStart] = useState(0);
 
-  const colKey = selectedCatalog && selectedSchema && selectedTable
-    ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null;
+  const isCustomQuery = useStore((s) => s.activeWorkspace?.datasource?.source_mode === "query");
+  const colKey = isCustomQuery
+    ? (selectedTable ? "__custom_source__" : null)
+    : (selectedCatalog && selectedSchema && selectedTable
+      ? `${selectedCatalog}.${selectedSchema}.${selectedTable}` : null);
   const allCols: ColumnMeta[] = useMemo(
     () => (colKey ? columns[colKey] ?? [] : []),
     [colKey, columns],
@@ -42,11 +47,13 @@ export default function FormulaExprInput({ value, onChange, placeholder }: Props
       return;
     }
     const q = result.token.toLowerCase();
-    const matches = allCols.filter((c) => c.col_name.toLowerCase().includes(q)).slice(0, 8);
+    const matches = allCols
+      .filter((c) => c.col_name.toLowerCase().includes(q) || resolveAlias(c.col_name).toLowerCase().includes(q))
+      .slice(0, 8);
     setSuggestions(matches);
     setTokenStart(result.start);
     setActiveIdx(0);
-  }, [allCols, extractToken]);
+  }, [allCols, extractToken, resolveAlias]);
 
   const insertSuggestion = useCallback((colName: string) => {
     const ta = textareaRef.current;
@@ -112,6 +119,8 @@ export default function FormulaExprInput({ value, onChange, placeholder }: Props
         <div className="formula-suggestions">
           {suggestions.map((col, i) => {
             const isNum = NUMERIC_RE.test(col.data_type);
+            const displayLabel = resolveAlias(col.col_name);
+            const showRaw = displayLabel !== col.col_name;
             return (
               <button
                 key={col.col_name}
@@ -125,7 +134,8 @@ export default function FormulaExprInput({ value, onChange, placeholder }: Props
                 <span className={`colpick-icon ${isNum ? "colpick-icon--num" : "colpick-icon--text"}`}>
                   {isNum ? <Hash size={10} /> : <Type size={10} />}
                 </span>
-                <span className="formula-suggestion-name">{col.col_name}</span>
+                <span className="formula-suggestion-name">{displayLabel}</span>
+                {showRaw && <span className="formula-suggestion-raw">{col.col_name}</span>}
                 <span className="colpick-dtype">{col.data_type}</span>
               </button>
             );
